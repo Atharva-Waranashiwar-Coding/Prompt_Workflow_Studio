@@ -103,6 +103,14 @@ docker compose up --build
 - Save workflow to backend
 - Reload workflow and continue editing
 
+## Phase 2 Execution Engine
+
+- Trigger workflow runs from the builder
+- Synchronous traversal across `prompt` -> `condition` branches -> `output`
+- Persist run headers (`workflow_runs`) and step logs (`workflow_run_steps`)
+- Inspect run history for a workflow
+- Inspect run details with per-step input/output/error
+
 ## API Endpoints
 
 - `GET /api/health`
@@ -113,6 +121,9 @@ docker compose up --build
 - `POST /api/projects/{project_id}/workflows`
 - `GET /api/workflows/{workflow_id}`
 - `PUT /api/workflows/{workflow_id}`
+- `GET /api/workflows/{workflow_id}/runs`
+- `POST /api/workflows/{workflow_id}/runs`
+- `GET /api/workflow-runs/{run_id}`
 
 ## Optional Seed
 

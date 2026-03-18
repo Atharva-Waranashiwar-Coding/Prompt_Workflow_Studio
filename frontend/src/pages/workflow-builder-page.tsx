@@ -1,19 +1,21 @@
 import { useEffect } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { NodeConfigPanel } from "@/components/workflow/node-config-panel";
 import { NodePalette } from "@/components/workflow/node-palette";
 import { WorkflowCanvas } from "@/components/workflow/workflow-canvas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useSaveWorkflowMutation, useWorkflowQuery } from "@/hooks/queries";
+import { useExecuteWorkflowMutation, useSaveWorkflowMutation, useWorkflowQuery } from "@/hooks/queries";
 import { useWorkflowBuilderStore } from "@/store/workflow-builder-store";
 
 export function WorkflowBuilderPage() {
   const { projectId, workflowId } = useParams<{ projectId: string; workflowId: string }>();
+  const navigate = useNavigate();
 
   const workflowQuery = useWorkflowQuery(workflowId);
   const saveWorkflowMutation = useSaveWorkflowMutation(workflowId, projectId);
+  const executeWorkflowMutation = useExecuteWorkflowMutation(workflowId);
 
   const initializeFromWorkflow = useWorkflowBuilderStore((state) => state.initializeFromWorkflow);
   const clear = useWorkflowBuilderStore((state) => state.clear);
@@ -40,6 +42,23 @@ export function WorkflowBuilderPage() {
       return;
     }
     await saveWorkflowMutation.mutateAsync(payload);
+  };
+
+  const onRun = async () => {
+    if (!workflowId || !projectId) {
+      return;
+    }
+
+    if (isDirty) {
+      const savePayload = toSavePayload();
+      if (!savePayload) {
+        return;
+      }
+      await saveWorkflowMutation.mutateAsync(savePayload);
+    }
+
+    const run = await executeWorkflowMutation.mutateAsync({});
+    void navigate(`/projects/${projectId}/workflows/${workflowId}/runs/${run.id}`);
   };
 
   if (workflowQuery.isLoading) {
@@ -77,10 +96,28 @@ export function WorkflowBuilderPage() {
           </div>
         </div>
 
-        <Button onClick={onSave} disabled={saveWorkflowMutation.isPending || !isDirty}>
-          {saveWorkflowMutation.isPending ? "Saving..." : isDirty ? "Save Workflow" : "Saved"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Link to={`/projects/${projectId}/workflows/${workflowId}/runs`} className="text-sm text-brand-700 hover:text-brand-800">
+            View Runs
+          </Link>
+          <Button onClick={onSave} disabled={saveWorkflowMutation.isPending || !isDirty}>
+            {saveWorkflowMutation.isPending ? "Saving..." : isDirty ? "Save Workflow" : "Saved"}
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={onRun}
+            disabled={saveWorkflowMutation.isPending || executeWorkflowMutation.isPending}
+          >
+            {executeWorkflowMutation.isPending ? "Running..." : "Run Workflow"}
+          </Button>
+        </div>
       </div>
+
+      {(saveWorkflowMutation.error || executeWorkflowMutation.error) && (
+        <p className="text-sm text-rose-600">
+          {((saveWorkflowMutation.error ?? executeWorkflowMutation.error) as Error).message}
+        </p>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[260px_1fr_320px]">
         <NodePalette />

@@ -1,8 +1,9 @@
 from fastapi import APIRouter
 
-from app.api.routes import health, projects, workflows
+from app.api.routes import health, projects, runs, workflows
 
 api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(projects.router)
 api_router.include_router(workflows.router)
+api_router.include_router(runs.router)

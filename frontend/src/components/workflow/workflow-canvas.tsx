@@ -21,12 +21,41 @@ function WorkflowNodeCard({ data, selected }: NodeProps<WorkflowReactNodeData>) 
     output: "border-emerald-300 bg-emerald-50/90",
   }[data.nodeType];
 
+  const isCondition = data.nodeType === "condition";
+  const isOutput = data.nodeType === "output";
+
   return (
     <div className={cn("min-w-48 rounded-lg border px-3 py-2 text-left shadow-sm", palette, selected && "ring-2 ring-brand-500")}>
       <Handle type="target" position={Position.Left} className="h-2 w-2 border border-white bg-slate-500" />
       <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{data.nodeType}</p>
       <p className="mt-1 text-sm font-medium text-slate-900">{data.label}</p>
-      <Handle type="source" position={Position.Right} className="h-2 w-2 border border-white bg-slate-700" />
+
+      {!isOutput && !isCondition && (
+        <Handle id="next" type="source" position={Position.Right} className="h-2 w-2 border border-white bg-slate-700" />
+      )}
+
+      {isCondition && (
+        <>
+          <div className="mt-2 flex justify-end gap-3 pr-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+            <span>True</span>
+            <span>False</span>
+          </div>
+          <Handle
+            id="true"
+            type="source"
+            position={Position.Right}
+            className="h-2 w-2 border border-white bg-emerald-600"
+            style={{ top: "43%" }}
+          />
+          <Handle
+            id="false"
+            type="source"
+            position={Position.Right}
+            className="h-2 w-2 border border-white bg-rose-500"
+            style={{ top: "73%" }}
+          />
+        </>
+      )}
     </div>
   );
 }

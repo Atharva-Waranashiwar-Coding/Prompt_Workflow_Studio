@@ -1,6 +1,9 @@
 import {
   type ProjectRecord,
   type WorkflowRecord,
+  type WorkflowRunDetailRecord,
+  type WorkflowRunRecord,
+  type WorkflowRunTriggerPayload,
   type WorkflowSavePayload,
 } from "@/types/workflow";
 import { getLocalAuthUserId } from "@/store/auth-store";
@@ -63,4 +66,22 @@ export function saveWorkflow(workflowId: string, payload: WorkflowSavePayload): 
     method: "PUT",
     body: JSON.stringify(payload),
   });
+}
+
+export function executeWorkflow(
+  workflowId: string,
+  payload: WorkflowRunTriggerPayload = {},
+): Promise<WorkflowRunDetailRecord> {
+  return request<WorkflowRunDetailRecord>(`/workflows/${workflowId}/runs`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getWorkflowRuns(workflowId: string): Promise<WorkflowRunRecord[]> {
+  return request<WorkflowRunRecord[]>(`/workflows/${workflowId}/runs`);
+}
+
+export function getWorkflowRun(runId: string): Promise<WorkflowRunDetailRecord> {
+  return request<WorkflowRunDetailRecord>(`/workflow-runs/${runId}`);
 }

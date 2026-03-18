@@ -64,6 +64,10 @@ export function NodeConfigPanel() {
               }
               placeholder="e.g. response.intent === 'purchase'"
             />
+            <p className="text-xs text-slate-500">
+              Connect this node using the <span className="font-semibold">True</span> and{" "}
+              <span className="font-semibold">False</span> handles on the right side.
+            </p>
           </div>
         )}
 

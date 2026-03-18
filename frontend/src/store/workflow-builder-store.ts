@@ -56,10 +56,10 @@ const NODE_LABELS: Record<NodeType, string> = {
 
 function defaultConfig(nodeType: NodeType): WorkflowNodeConfig {
   if (nodeType === "prompt") {
-    return { promptTemplate: "" };
+    return { promptTemplate: "Generate a response based on the current context." };
   }
   if (nodeType === "condition") {
-    return { conditionExpression: "" };
+    return { conditionExpression: "true" };
   }
   return { outputFormat: "text" };
 }
@@ -309,11 +309,18 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
       return;
     }
 
+    const branchHandle =
+      connection.sourceHandle === "true" || connection.sourceHandle === "false"
+        ? connection.sourceHandle
+        : null;
+
     const reactFlowEdges = state.edgeOrder.map((edgeId) => entityEdgeToReactFlowEdge(state.edgesById[edgeId]));
     const nextEdges = addEdge(
       {
         ...connection,
         id: crypto.randomUUID(),
+        label: branchHandle ? branchHandle.toUpperCase() : undefined,
+        data: branchHandle ? { branch: branchHandle } : undefined,
       },
       reactFlowEdges,
     ).map((edge) => reactFlowEdgeToEntity(edge));

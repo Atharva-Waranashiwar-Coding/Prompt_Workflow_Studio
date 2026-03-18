@@ -10,6 +10,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.project import Project
+    from app.models.run import WorkflowRun
 
 
 class Workflow(Base):
@@ -36,6 +37,11 @@ class Workflow(Base):
         back_populates="workflow",
         cascade="all, delete-orphan",
         order_by="WorkflowEdge.created_at",
+    )
+    runs: Mapped[list["WorkflowRun"]] = relationship(
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        order_by="WorkflowRun.created_at",
     )
 
 

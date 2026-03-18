@@ -49,7 +49,7 @@ def seed_sample_data() -> None:
                     label="Condition Node",
                     position_x=380,
                     position_y=140,
-                    config={"conditionExpression": "intent == 'billing'"},
+                    config={"conditionExpression": "contains:billing"},
                 ),
                 WorkflowNode(
                     id=output_id,
@@ -76,6 +76,14 @@ def seed_sample_data() -> None:
                     workflow_id=workflow.id,
                     source_node_id=condition_id,
                     target_node_id=output_id,
+                    source_handle="true",
+                ),
+                WorkflowEdge(
+                    id=uuid.uuid4(),
+                    workflow_id=workflow.id,
+                    source_node_id=condition_id,
+                    target_node_id=output_id,
+                    source_handle="false",
                 ),
             ]
         )

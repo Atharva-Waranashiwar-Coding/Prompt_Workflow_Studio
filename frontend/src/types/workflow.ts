@@ -79,3 +79,42 @@ export interface WorkflowReactNodeData {
   nodeType: NodeType;
   config: WorkflowNodeConfig;
 }
+
+export type WorkflowRunStatus = "queued" | "running" | "completed" | "failed";
+export type WorkflowRunStepStatus = "running" | "completed" | "failed";
+
+export interface WorkflowRunStepRecord {
+  id: string;
+  run_id: string;
+  step_index: number;
+  node_id: string;
+  node_type: string;
+  node_label: string;
+  status: WorkflowRunStepStatus;
+  input_payload: Record<string, unknown> | null;
+  output_payload: Record<string, unknown> | null;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface WorkflowRunRecord {
+  id: string;
+  workflow_id: string;
+  triggered_by_user_id: string | null;
+  status: WorkflowRunStatus;
+  error_message: string | null;
+  result_payload: Record<string, unknown> | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface WorkflowRunDetailRecord extends WorkflowRunRecord {
+  steps: WorkflowRunStepRecord[];
+}
+
+export interface WorkflowRunTriggerPayload {
+  input_payload?: Record<string, unknown>;
+}

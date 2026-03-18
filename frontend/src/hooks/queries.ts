@@ -3,19 +3,24 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createProject,
   createWorkflow,
+  executeWorkflow,
   getProject,
   getProjects,
   getWorkflow,
+  getWorkflowRun,
+  getWorkflowRuns,
   getWorkflows,
   saveWorkflow,
 } from "@/lib/api";
-import { type WorkflowSavePayload } from "@/types/workflow";
+import { type WorkflowRunTriggerPayload, type WorkflowSavePayload } from "@/types/workflow";
 
 export const queryKeys = {
   projects: ["projects"] as const,
   project: (projectId: string) => ["projects", projectId] as const,
   workflows: (projectId: string) => ["projects", projectId, "workflows"] as const,
   workflow: (workflowId: string) => ["workflows", workflowId] as const,
+  workflowRuns: (workflowId: string) => ["workflows", workflowId, "runs"] as const,
+  workflowRun: (runId: string) => ["workflow-runs", runId] as const,
 };
 
 export function useProjectsQuery() {
@@ -82,6 +87,36 @@ export function useSaveWorkflowMutation(workflowId: string | undefined, projectI
       if (projectId) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.workflows(projectId) });
       }
+    },
+  });
+}
+
+export function useWorkflowRunsQuery(workflowId: string | undefined) {
+  return useQuery({
+    queryKey: workflowId ? queryKeys.workflowRuns(workflowId) : ["workflow-runs", "missing"],
+    queryFn: () => getWorkflowRuns(workflowId as string),
+    enabled: Boolean(workflowId),
+  });
+}
+
+export function useWorkflowRunQuery(runId: string | undefined) {
+  return useQuery({
+    queryKey: runId ? queryKeys.workflowRun(runId) : ["workflow-run", "missing"],
+    queryFn: () => getWorkflowRun(runId as string),
+    enabled: Boolean(runId),
+  });
+}
+
+export function useExecuteWorkflowMutation(workflowId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: WorkflowRunTriggerPayload = {}) =>
+      executeWorkflow(workflowId as string, payload),
+    onSuccess: (run) => {
+      if (workflowId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workflowRuns(workflowId) });
+      }
+      void queryClient.setQueryData(queryKeys.workflowRun(run.id), run);
     },
   });
 }
