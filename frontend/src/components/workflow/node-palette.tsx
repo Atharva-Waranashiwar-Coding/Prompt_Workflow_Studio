@@ -1,4 +1,4 @@
-import { FileCode, GitBranch, MonitorSmartphone } from "lucide-react";
+import { FileCode, GitBranch, MonitorSmartphone, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +22,12 @@ const nodeOptions = [
     title: "Output",
     description: "Define final output shape for downstream systems",
     icon: MonitorSmartphone,
+  },
+  {
+    type: "tool" as const,
+    title: "Tool",
+    description: "Invoke an MCP-exposed tool during execution",
+    icon: Wrench,
   },
 ];
 

@@ -5,3 +5,4 @@ psycopg[binary]==3.2.6
 alembic==1.15.1
 pydantic==2.11.1
 pydantic-settings==2.8.1
+fastapi-mcp

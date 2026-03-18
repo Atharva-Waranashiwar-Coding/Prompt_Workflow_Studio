@@ -3,6 +3,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -11,6 +12,8 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.project import Project
 from app.models.run import WorkflowRun, WorkflowRunStep
 from app.models.workflow import Workflow, WorkflowEdge, WorkflowNode
+from app.services.tool_service import invoke_tool_by_name
+from app.tools.registry import get_tool_definition
 
 RUN_STATUS_QUEUED = "queued"
 RUN_STATUS_RUNNING = "running"
@@ -62,6 +65,39 @@ def _parse_literal(token: str) -> object:
         return ast.literal_eval(token)
     except (ValueError, SyntaxError):
         return token.strip().strip('"').strip("'")
+
+
+def _resolve_context_path(context: dict[str, Any], path: str) -> Any:
+    current: Any = context
+    for part in path.split("."):
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+            continue
+        return None
+    return current
+
+
+def _resolve_templates(value: Any, context: dict[str, Any]) -> Any:
+    if isinstance(value, dict):
+        return {key: _resolve_templates(sub_value, context) for key, sub_value in value.items()}
+    if isinstance(value, list):
+        return [_resolve_templates(item, context) for item in value]
+    if not isinstance(value, str):
+        return value
+
+    matches = list(re.finditer(r"\{\{\s*([^}]+?)\s*\}\}", value))
+    if not matches:
+        return value
+
+    if len(matches) == 1 and matches[0].span() == (0, len(value)):
+        return _resolve_context_path(context, matches[0].group(1).strip())
+
+    resolved = value
+    for match in matches:
+        token = match.group(1).strip()
+        replacement = _resolve_context_path(context, token)
+        resolved = resolved.replace(match.group(0), _stringify(replacement))
+    return resolved
 
 
 def _evaluate_condition_expression(expression: str, last_output: object) -> bool:
@@ -167,7 +203,7 @@ def validate_workflow_for_execution(workflow: Workflow) -> ExecutionGraph:
         node_config = node.config or {}
         outgoing = outgoing_edges[node_id]
 
-        if node_type not in {"prompt", "condition", "output"}:
+        if node_type not in {"prompt", "condition", "output", "tool"}:
             raise ValueError(f"Unsupported node type '{node_type}' in workflow.")
 
         if node_type == "prompt":
@@ -197,6 +233,18 @@ def validate_workflow_for_execution(workflow: Workflow) -> ExecutionGraph:
 
         if node_type == "output" and outgoing:
             raise ValueError(f"Output node '{node.label}' must not have outgoing edges.")
+
+        if node_type == "tool":
+            tool_name = str(node_config.get("toolName", "")).strip()
+            if not tool_name:
+                raise ValueError(f"Tool node '{node.label}' must define toolName.")
+            if get_tool_definition(tool_name) is None:
+                raise ValueError(f"Tool node '{node.label}' references unsupported tool '{tool_name}'.")
+            tool_params = node_config.get("toolParams", {})
+            if not isinstance(tool_params, dict):
+                raise ValueError(f"Tool node '{node.label}' toolParams must be an object.")
+            if len(outgoing) != 1:
+                raise ValueError(f"Tool node '{node.label}' must have exactly one outgoing edge.")
 
     return ExecutionGraph(
         start_node_id=start_node_id,
@@ -236,6 +284,37 @@ def _execute_output_node(node: WorkflowNode, last_output: object) -> dict:
         "format": output_format,
         "result": result,
     }
+
+
+def _execute_tool_node(
+    db: Session,
+    node: WorkflowNode,
+    run_input: dict[str, Any],
+    last_output: object,
+    step_outputs: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    tool_name = str((node.config or {}).get("toolName", "")).strip()
+    if not tool_name:
+        raise ValueError("Tool node is missing toolName.")
+
+    raw_tool_params = (node.config or {}).get("toolParams", {})
+    if raw_tool_params is None:
+        raw_tool_params = {}
+    if not isinstance(raw_tool_params, dict):
+        raise ValueError("Tool node toolParams must be an object.")
+
+    tool_context = {
+        "run_input": run_input,
+        "last_output": last_output,
+        "step_outputs": step_outputs,
+        "node_id": str(node.id),
+    }
+    resolved_params = _resolve_templates(raw_tool_params, tool_context)
+    if not isinstance(resolved_params, dict):
+        raise ValueError("Resolved tool params must be an object.")
+
+    output = invoke_tool_by_name(db, tool_name=tool_name, params=resolved_params, context=tool_context)
+    return output, resolved_params
 
 
 def _next_node_for_non_condition(graph: ExecutionGraph, node_id: UUID) -> UUID | None:
@@ -318,6 +397,23 @@ def execute_workflow_run(
                     node_output = _execute_condition_node(node, last_output=state["last_output"])
                     condition_result = bool(node_output["result"])
                     next_node_id = _next_node_for_condition(graph, node.id, condition_result)
+                elif node.node_type == "tool":
+                    step_outputs_for_context = dict(state["step_outputs"])
+                    node_output, resolved_params = _execute_tool_node(
+                        db,
+                        node=node,
+                        run_input=run_input,
+                        last_output=state["last_output"],
+                        step_outputs=step_outputs_for_context,
+                    )
+                    step.input_payload = _to_json(
+                        {
+                            **step_input,
+                            "tool_name": (node.config or {}).get("toolName"),
+                            "resolved_tool_params": resolved_params,
+                        }
+                    )
+                    next_node_id = _next_node_for_non_condition(graph, node.id)
                 elif node.node_type == "output":
                     node_output = _execute_output_node(node, last_output=state["last_output"])
                     next_node_id = None

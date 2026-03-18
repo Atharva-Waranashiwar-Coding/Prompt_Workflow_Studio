@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     default_user_email: str = "dev@promptworkflow.local"
     default_user_name: str = "Dev User"
+    enable_mcp_tools: bool = True
+    mcp_mount_path: str = "/mcp"
 
     @field_validator("cors_origins", mode="before")
     @classmethod

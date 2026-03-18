@@ -52,6 +52,7 @@ const NODE_LABELS: Record<NodeType, string> = {
   prompt: "Prompt Node",
   condition: "Condition Node",
   output: "Output Node",
+  tool: "Tool Node",
 };
 
 function defaultConfig(nodeType: NodeType): WorkflowNodeConfig {
@@ -60,6 +61,12 @@ function defaultConfig(nodeType: NodeType): WorkflowNodeConfig {
   }
   if (nodeType === "condition") {
     return { conditionExpression: "true" };
+  }
+  if (nodeType === "tool") {
+    return {
+      toolName: "template_fetch",
+      toolParams: { template_key: "default_support" },
+    };
   }
   return { outputFormat: "text" };
 }

@@ -27,6 +27,8 @@ services:
       CORS_ORIGINS: http://localhost:5173
       DEFAULT_USER_EMAIL: dev@promptworkflow.local
       DEFAULT_USER_NAME: Dev User
+      ENABLE_MCP_TOOLS: "true"
+      MCP_MOUNT_PATH: /mcp
     volumes:
       - ./backend:/app
     ports:

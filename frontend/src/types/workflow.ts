@@ -1,9 +1,11 @@
-export type NodeType = "prompt" | "condition" | "output";
+export type NodeType = "prompt" | "condition" | "output" | "tool";
 
 export type WorkflowNodeConfig = {
   promptTemplate?: string;
   conditionExpression?: string;
   outputFormat?: string;
+  toolName?: string;
+  toolParams?: Record<string, unknown>;
   [key: string]: unknown;
 };
 
@@ -117,4 +119,12 @@ export interface WorkflowRunDetailRecord extends WorkflowRunRecord {
 
 export interface WorkflowRunTriggerPayload {
   input_payload?: Record<string, unknown>;
+}
+
+export interface ToolDefinitionRecord {
+  name: string;
+  title: string;
+  description: string;
+  parameter_schema: Record<string, unknown>;
+  default_params: Record<string, unknown>;
 }

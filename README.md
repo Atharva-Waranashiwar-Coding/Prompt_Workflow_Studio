@@ -111,6 +111,16 @@ docker compose up --build
 - Inspect run history for a workflow
 - Inspect run details with per-step input/output/error
 
+## Phase 3 MCP + Tool Nodes
+
+- Added `tool` node support in visual workflow builder
+- Added backend tool registry and internal FastAPI tool endpoints
+- Exposed tool endpoints via Tadata `fastapi-mcp` integration
+- Added Tool picker + Tool params config in node side panel
+- Added execution engine support for invoking Tool nodes
+- Persisted Tool node execution input/output/error in run steps
+- MCP mount path is configurable via `MCP_MOUNT_PATH` (default: `/mcp`)
+
 ## API Endpoints
 
 - `GET /api/health`
@@ -124,6 +134,12 @@ docker compose up --build
 - `GET /api/workflows/{workflow_id}/runs`
 - `POST /api/workflows/{workflow_id}/runs`
 - `GET /api/workflow-runs/{run_id}`
+- `GET /api/tools`
+- `POST /api/tools/template_fetch`
+- `POST /api/tools/memory_read`
+- `POST /api/tools/memory_write`
+- `POST /api/tools/document_lookup`
+- `POST /api/tools/output_schema_validate`
 
 ## Optional Seed
 
@@ -136,4 +152,5 @@ docker compose exec backend python -m app.db.seed
 ## Notes
 
 - Authentication is scaffolded only (local user header + default dev user bootstrap).
-- Execution engine, MCP integration, and AI features are intentionally not included in this phase.
+- Execution remains synchronous in-request for now.
+- Tools are local/internal only for this phase (no external providers yet).

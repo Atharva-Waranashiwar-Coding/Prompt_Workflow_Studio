@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.core.config import get_settings
+from app.core.mcp import mount_mcp_tools
 from app.db.session import SessionLocal
 from app.services.auth_service import ensure_default_user
 
@@ -32,3 +33,4 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)
+mount_mcp_tools(app)

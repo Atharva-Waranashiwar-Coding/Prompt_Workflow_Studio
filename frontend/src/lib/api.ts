@@ -1,5 +1,6 @@
 import {
   type ProjectRecord,
+  type ToolDefinitionRecord,
   type WorkflowRecord,
   type WorkflowRunDetailRecord,
   type WorkflowRunRecord,
@@ -84,4 +85,8 @@ export function getWorkflowRuns(workflowId: string): Promise<WorkflowRunRecord[]
 
 export function getWorkflowRun(runId: string): Promise<WorkflowRunDetailRecord> {
   return request<WorkflowRunDetailRecord>(`/workflow-runs/${runId}`);
+}
+
+export function getTools(): Promise<ToolDefinitionRecord[]> {
+  return request<ToolDefinitionRecord[]>("/tools");
 }

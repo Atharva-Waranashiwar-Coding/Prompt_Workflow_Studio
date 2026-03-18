@@ -6,6 +6,7 @@ import {
   executeWorkflow,
   getProject,
   getProjects,
+  getTools,
   getWorkflow,
   getWorkflowRun,
   getWorkflowRuns,
@@ -21,6 +22,7 @@ export const queryKeys = {
   workflow: (workflowId: string) => ["workflows", workflowId] as const,
   workflowRuns: (workflowId: string) => ["workflows", workflowId, "runs"] as const,
   workflowRun: (runId: string) => ["workflow-runs", runId] as const,
+  tools: ["tools"] as const,
 };
 
 export function useProjectsQuery() {
@@ -118,5 +120,13 @@ export function useExecuteWorkflowMutation(workflowId: string | undefined) {
       }
       void queryClient.setQueryData(queryKeys.workflowRun(run.id), run);
     },
+  });
+}
+
+export function useToolsQuery() {
+  return useQuery({
+    queryKey: queryKeys.tools,
+    queryFn: getTools,
+    staleTime: 60_000,
   });
 }

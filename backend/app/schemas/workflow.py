@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-NodeType = Literal["prompt", "condition", "output"]
+NodeType = Literal["prompt", "condition", "output", "tool"]
 
 
 class WorkflowCreate(BaseModel):
