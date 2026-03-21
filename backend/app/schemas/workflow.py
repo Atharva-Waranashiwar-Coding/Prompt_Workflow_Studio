@@ -14,6 +14,8 @@ class WorkflowCreate(BaseModel):
 
 
 class WorkflowNodePayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     node_type: NodeType
     label: str = Field(min_length=1, max_length=255)
@@ -23,6 +25,8 @@ class WorkflowNodePayload(BaseModel):
 
 
 class WorkflowEdgePayload(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     source_node_id: UUID
     target_node_id: UUID

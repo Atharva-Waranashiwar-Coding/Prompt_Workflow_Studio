@@ -185,6 +185,7 @@ def get_workflow_for_user(db: Session, workflow_id: UUID, user_id: UUID) -> Work
         select(Workflow)
         .where(Workflow.id == workflow_id)
         .options(*_workflow_load_options())
+        .execution_options(populate_existing=True)
     )
     workflow = db.scalar(stmt)
     if workflow is None:
@@ -227,6 +228,7 @@ def save_workflow_graph(
                 config=node.config,
             )
         )
+    db.flush()
 
     for edge in payload.edges:
         db.add(
@@ -241,6 +243,7 @@ def save_workflow_graph(
                 data=edge.data,
             )
         )
+    db.flush()
 
     _sync_workflow_tags(db, workflow, payload.tags)
     record_audit_log(
@@ -369,8 +372,10 @@ def _restore_snapshot_into_workflow(db: Session, *, workflow: Workflow, version:
     db.execute(delete(WorkflowNode).where(WorkflowNode.workflow_id == workflow.id))
     for node in parsed_nodes:
         db.add(node)
+    db.flush()
     for edge in parsed_edges:
         db.add(edge)
+    db.flush()
     _sync_workflow_tags(db, workflow, version.tags_snapshot)
 
 
@@ -439,6 +444,7 @@ def duplicate_workflow(
                 config=_to_json(source_node.config or {}),
             )
         )
+    db.flush()
 
     for source_edge in source_workflow.edges:
         db.add(
@@ -453,6 +459,7 @@ def duplicate_workflow(
                 data=_to_json(source_edge.data),
             )
         )
+    db.flush()
 
     _sync_workflow_tags(db, duplicate, source_workflow.tags)
     db.flush()

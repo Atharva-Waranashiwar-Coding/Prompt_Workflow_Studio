@@ -237,6 +237,14 @@ function reactFlowEdgeToEntity(edge: Edge): WorkflowEdgeEntity {
   };
 }
 
+function isPersistedNodeChange(change: NodeChange): boolean {
+  return change.type === "add" || change.type === "remove" || change.type === "position" || change.type === "reset";
+}
+
+function isPersistedEdgeChange(change: EdgeChange): boolean {
+  return change.type === "add" || change.type === "remove" || change.type === "reset";
+}
+
 function entityNodeToApiNode(node: WorkflowNodeEntity): WorkflowApiNode {
   return {
     id: node.id,
@@ -606,9 +614,17 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
   },
 
   onNodesChange: (changes) => {
+    if (changes.length === 0) {
+      return;
+    }
+    const relevantChanges = changes.filter((change) => isPersistedNodeChange(change));
+    if (relevantChanges.length === 0) {
+      return;
+    }
+
     const state = get();
     const reactFlowNodes = state.nodeOrder.map((nodeId) => entityNodeToReactFlowNode(state.nodesById[nodeId]));
-    const updatedNodes = applyNodeChanges(changes, reactFlowNodes).map((node) => reactFlowNodeToEntity(node));
+    const updatedNodes = applyNodeChanges(relevantChanges, reactFlowNodes).map((node) => reactFlowNodeToEntity(node));
     const normalized = normalizeNodes(updatedNodes);
 
     set({
@@ -619,9 +635,17 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
   },
 
   onEdgesChange: (changes) => {
+    if (changes.length === 0) {
+      return;
+    }
+    const relevantChanges = changes.filter((change) => isPersistedEdgeChange(change));
+    if (relevantChanges.length === 0) {
+      return;
+    }
+
     const state = get();
     const reactFlowEdges = state.edgeOrder.map((edgeId) => entityEdgeToReactFlowEdge(state.edgesById[edgeId]));
-    const updatedEdges = applyEdgeChanges(changes, reactFlowEdges).map((edge) => reactFlowEdgeToEntity(edge));
+    const updatedEdges = applyEdgeChanges(relevantChanges, reactFlowEdges).map((edge) => reactFlowEdgeToEntity(edge));
     const normalized = normalizeEdges(updatedEdges);
 
     set({
@@ -688,8 +712,17 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
       return null;
     }
 
-    const nodes = state.nodeOrder.map((nodeId) => entityNodeToApiNode(state.nodesById[nodeId]));
-    const edges = state.edgeOrder.map((edgeId) => entityEdgeToApiEdge(state.edgesById[edgeId]));
+    const nodes = state.nodeOrder
+      .map((nodeId) => state.nodesById[nodeId])
+      .filter((node): node is WorkflowNodeEntity => Boolean(node))
+      .map((node) => entityNodeToApiNode(node));
+
+    const nodeIdSet = new Set(nodes.map((node) => node.id));
+    const edges = state.edgeOrder
+      .map((edgeId) => state.edgesById[edgeId])
+      .filter((edge): edge is WorkflowEdgeEntity => Boolean(edge))
+      .filter((edge) => nodeIdSet.has(edge.source) && nodeIdSet.has(edge.target))
+      .map((edge) => entityEdgeToApiEdge(edge));
 
     return {
       name: state.name,
