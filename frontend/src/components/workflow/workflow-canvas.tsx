@@ -20,6 +20,9 @@ function WorkflowNodeCard({ data, selected }: NodeProps<WorkflowReactNodeData>) 
     condition: "border-amber-300 bg-amber-50/90",
     output: "border-emerald-300 bg-emerald-50/90",
     tool: "border-cyan-300 bg-cyan-50/90",
+    memory_read: "border-violet-300 bg-violet-50/90",
+    memory_write: "border-indigo-300 bg-indigo-50/90",
+    validator: "border-rose-300 bg-rose-50/90",
   }[data.nodeType];
 
   const isCondition = data.nodeType === "condition";
@@ -66,6 +69,9 @@ const nodeTypes = {
   condition: WorkflowNodeCard,
   output: WorkflowNodeCard,
   tool: WorkflowNodeCard,
+  memory_read: WorkflowNodeCard,
+  memory_write: WorkflowNodeCard,
+  validator: WorkflowNodeCard,
 };
 
 export function WorkflowCanvas() {

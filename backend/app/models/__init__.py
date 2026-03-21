@@ -1,3 +1,4 @@
+from app.models.memory import WorkflowMemoryEntry
 from app.models.project import Project
 from app.models.run import WorkflowRun, WorkflowRunStep
 from app.models.tool_data import ToolDocument, ToolMemoryEntry, ToolTemplate
@@ -12,6 +13,7 @@ __all__ = [
     "WorkflowEdge",
     "WorkflowRun",
     "WorkflowRunStep",
+    "WorkflowMemoryEntry",
     "ToolTemplate",
     "ToolMemoryEntry",
     "ToolDocument",

@@ -1,4 +1,18 @@
-export type NodeType = "prompt" | "condition" | "output" | "tool";
+export type NodeType = "prompt" | "condition" | "output" | "tool" | "memory_read" | "memory_write" | "validator";
+
+export type MemoryScope = "project" | "workflow" | "run";
+export type ValidatorRuleType = "contains" | "equals" | "non-empty";
+
+export interface ValidatorRule {
+  type: ValidatorRuleType;
+  path?: string;
+  value?: unknown;
+}
+
+export interface ValidatorSchema {
+  required?: string[];
+  properties?: Record<string, "string" | "number" | "boolean" | "object" | "array">;
+}
 
 export type WorkflowNodeConfig = {
   promptTemplate?: string;
@@ -6,6 +20,15 @@ export type WorkflowNodeConfig = {
   outputFormat?: string;
   toolName?: string;
   toolParams?: Record<string, unknown>;
+  memoryScope?: MemoryScope;
+  memoryKey?: string;
+  fallbackValue?: unknown;
+  valueTemplate?: unknown;
+  targetPath?: string;
+  requiredFields?: string[];
+  schema?: ValidatorSchema;
+  rules?: ValidatorRule[];
+  failOnError?: boolean;
   [key: string]: unknown;
 };
 
@@ -93,8 +116,8 @@ export interface WorkflowRunStepRecord {
   node_type: string;
   node_label: string;
   status: WorkflowRunStepStatus;
-  input_payload: Record<string, unknown> | null;
-  output_payload: Record<string, unknown> | null;
+  input_payload: unknown | null;
+  output_payload: unknown | null;
   error_message: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -107,7 +130,7 @@ export interface WorkflowRunRecord {
   triggered_by_user_id: string | null;
   status: WorkflowRunStatus;
   error_message: string | null;
-  result_payload: Record<string, unknown> | null;
+  result_payload: unknown | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -118,6 +141,10 @@ export interface WorkflowRunDetailRecord extends WorkflowRunRecord {
 }
 
 export interface WorkflowRunTriggerPayload {
+  input_payload?: Record<string, unknown>;
+}
+
+export interface WorkflowRunStepRetryPayload {
   input_payload?: Record<string, unknown>;
 }
 

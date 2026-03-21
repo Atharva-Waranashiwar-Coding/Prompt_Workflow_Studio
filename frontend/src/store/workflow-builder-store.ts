@@ -53,6 +53,9 @@ const NODE_LABELS: Record<NodeType, string> = {
   condition: "Condition Node",
   output: "Output Node",
   tool: "Tool Node",
+  memory_read: "Memory Read Node",
+  memory_write: "Memory Write Node",
+  validator: "Validator Node",
 };
 
 function defaultConfig(nodeType: NodeType): WorkflowNodeConfig {
@@ -66,6 +69,36 @@ function defaultConfig(nodeType: NodeType): WorkflowNodeConfig {
     return {
       toolName: "template_fetch",
       toolParams: { template_key: "default_support" },
+    };
+  }
+  if (nodeType === "memory_read") {
+    return {
+      memoryScope: "workflow",
+      memoryKey: "session.summary",
+      fallbackValue: "",
+    };
+  }
+  if (nodeType === "memory_write") {
+    return {
+      memoryScope: "workflow",
+      memoryKey: "session.summary",
+      valueTemplate: "{{last_output}}",
+    };
+  }
+  if (nodeType === "validator") {
+    return {
+      targetPath: "last_output",
+      requiredFields: [],
+      schema: {
+        required: [],
+        properties: {},
+      },
+      rules: [
+        {
+          type: "non-empty",
+        },
+      ],
+      failOnError: true,
     };
   }
   return { outputFormat: "text" };

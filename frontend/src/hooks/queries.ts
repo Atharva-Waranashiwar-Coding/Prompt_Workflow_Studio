@@ -11,9 +11,14 @@ import {
   getWorkflowRun,
   getWorkflowRuns,
   getWorkflows,
+  retryWorkflowRunStep,
   saveWorkflow,
 } from "@/lib/api";
-import { type WorkflowRunTriggerPayload, type WorkflowSavePayload } from "@/types/workflow";
+import {
+  type WorkflowRunStepRetryPayload,
+  type WorkflowRunTriggerPayload,
+  type WorkflowSavePayload,
+} from "@/types/workflow";
 
 export const queryKeys = {
   projects: ["projects"] as const,
@@ -119,6 +124,20 @@ export function useExecuteWorkflowMutation(workflowId: string | undefined) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.workflowRuns(workflowId) });
       }
       void queryClient.setQueryData(queryKeys.workflowRun(run.id), run);
+    },
+  });
+}
+
+export function useRetryWorkflowRunStepMutation(runId: string | undefined, workflowId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { stepId: string; body?: WorkflowRunStepRetryPayload }) =>
+      retryWorkflowRunStep(runId as string, payload.stepId, payload.body ?? {}),
+    onSuccess: (run) => {
+      void queryClient.setQueryData(queryKeys.workflowRun(run.id), run);
+      if (workflowId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workflowRuns(workflowId) });
+      }
     },
   });
 }

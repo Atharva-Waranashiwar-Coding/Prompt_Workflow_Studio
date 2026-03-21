@@ -4,6 +4,7 @@ import {
   type WorkflowRecord,
   type WorkflowRunDetailRecord,
   type WorkflowRunRecord,
+  type WorkflowRunStepRetryPayload,
   type WorkflowRunTriggerPayload,
   type WorkflowSavePayload,
 } from "@/types/workflow";
@@ -85,6 +86,17 @@ export function getWorkflowRuns(workflowId: string): Promise<WorkflowRunRecord[]
 
 export function getWorkflowRun(runId: string): Promise<WorkflowRunDetailRecord> {
   return request<WorkflowRunDetailRecord>(`/workflow-runs/${runId}`);
+}
+
+export function retryWorkflowRunStep(
+  runId: string,
+  stepId: string,
+  payload: WorkflowRunStepRetryPayload = {},
+): Promise<WorkflowRunDetailRecord> {
+  return request<WorkflowRunDetailRecord>(`/workflow-runs/${runId}/steps/${stepId}/retry`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getTools(): Promise<ToolDefinitionRecord[]> {

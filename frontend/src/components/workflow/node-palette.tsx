@@ -1,4 +1,4 @@
-import { FileCode, GitBranch, MonitorSmartphone, Wrench } from "lucide-react";
+import { Database, FileCode, GitBranch, MonitorSmartphone, ShieldCheck, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +28,24 @@ const nodeOptions = [
     title: "Tool",
     description: "Invoke an MCP-exposed tool during execution",
     icon: Wrench,
+  },
+  {
+    type: "memory_read" as const,
+    title: "Memory Read",
+    description: "Load scoped memory values into execution context",
+    icon: Database,
+  },
+  {
+    type: "memory_write" as const,
+    title: "Memory Write",
+    description: "Persist values to project/workflow/run memory",
+    icon: Database,
+  },
+  {
+    type: "validator" as const,
+    title: "Validator",
+    description: "Apply schema and rule checks to node outputs",
+    icon: ShieldCheck,
   },
 ];
 

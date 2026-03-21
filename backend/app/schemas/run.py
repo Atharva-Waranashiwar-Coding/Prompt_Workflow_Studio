@@ -22,8 +22,8 @@ class WorkflowRunStepRead(BaseModel):
     node_type: str
     node_label: str
     status: StepStatus
-    input_payload: dict[str, Any] | None
-    output_payload: dict[str, Any] | None
+    input_payload: Any | None
+    output_payload: Any | None
     error_message: str | None
     started_at: datetime | None
     completed_at: datetime | None
@@ -38,7 +38,7 @@ class WorkflowRunRead(BaseModel):
     triggered_by_user_id: UUID | None
     status: RunStatus
     error_message: str | None
-    result_payload: dict[str, Any] | None
+    result_payload: Any | None
     started_at: datetime | None
     completed_at: datetime | None
     created_at: datetime
@@ -46,3 +46,7 @@ class WorkflowRunRead(BaseModel):
 
 class WorkflowRunDetailRead(WorkflowRunRead):
     steps: list[WorkflowRunStepRead]
+
+
+class WorkflowRunStepRetryRequest(BaseModel):
+    input_payload: dict[str, Any] = Field(default_factory=dict)
