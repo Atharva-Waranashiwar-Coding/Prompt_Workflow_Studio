@@ -1,5 +1,6 @@
-import { Link } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 
+import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
 
 export function TopNav() {
@@ -18,8 +19,29 @@ export function TopNav() {
           </div>
         </Link>
 
-        <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600">
-          {user?.displayName ?? "Local User"}
+        <div className="flex items-center gap-3">
+          <nav className="flex items-center gap-2 text-sm">
+            <NavLink
+              to="/"
+              end
+              className={({ isActive }) =>
+                cn("rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100", isActive && "bg-slate-100 text-slate-900")
+              }
+            >
+              Projects
+            </NavLink>
+            <NavLink
+              to="/dashboard"
+              className={({ isActive }) =>
+                cn("rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100", isActive && "bg-slate-100 text-slate-900")
+              }
+            >
+              Dashboard
+            </NavLink>
+          </nav>
+          <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600">
+            {user?.displayName ?? "Local User"}
+          </div>
         </div>
       </div>
     </header>

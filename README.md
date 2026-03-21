@@ -1,6 +1,6 @@
-# Prompt Workflow Studio (Phase 1)
+# Prompt Workflow Studio
 
-Phase 1 foundation for a visual prompt workflow orchestration platform.
+Incremental build of a visual prompt workflow orchestration platform.
 
 ## Stack
 
@@ -133,6 +133,16 @@ docker compose up --build
 - Added timeout and simulated budget tracking (`token_budget`, `token_used`, `context_budget`, `context_used`)
 - Frontend run views now poll active runs and expose cancel/retry actions
 
+## Phase 6 Product Features
+
+- Workflow versioning with publish/list/restore APIs
+- Workflow duplication/fork scaffold (`duplicate` endpoint + UI action)
+- Tagging + search filters by name/tag/tool/project
+- Basic collaboration model with project memberships (`owner`, `editor`, `viewer`)
+- Backend role checks enforced for edit/run/member-management actions
+- Audit log activity history for workflow/run/member events and tool execution
+- Dashboard analytics for workflow/run counts, failures, top tools, and recent activity
+
 ## API Endpoints
 
 - `GET /api/health`
@@ -149,6 +159,19 @@ docker compose up --build
 - `POST /api/workflow-runs/{run_id}/cancel`
 - `POST /api/workflow-runs/{run_id}/retry`
 - `POST /api/workflow-runs/{run_id}/steps/{step_id}/retry`
+- `GET /api/workflows/search`
+- `POST /api/workflows/{workflow_id}/duplicate`
+- `GET /api/workflows/{workflow_id}/versions`
+- `POST /api/workflows/{workflow_id}/versions/publish`
+- `GET /api/workflows/{workflow_id}/versions/{version_id}`
+- `POST /api/workflows/{workflow_id}/versions/{version_id}/restore`
+- `GET /api/projects/{project_id}/access`
+- `GET /api/projects/{project_id}/members`
+- `POST /api/projects/{project_id}/members`
+- `PATCH /api/projects/{project_id}/members/{membership_id}`
+- `DELETE /api/projects/{project_id}/members/{membership_id}`
+- `GET /api/projects/{project_id}/activity`
+- `GET /api/analytics/dashboard`
 - `GET /api/tools`
 - `POST /api/tools/template_fetch`
 - `POST /api/tools/memory_read`
@@ -167,5 +190,5 @@ docker compose exec backend python -m app.db.seed
 ## Notes
 
 - Authentication is scaffolded only (local user header + default dev user bootstrap).
-- Execution remains synchronous in-request for now.
+- Workflow execution is background-queued through Celery workers.
 - Tools are local/internal only for this phase (no external providers yet).

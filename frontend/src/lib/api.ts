@@ -1,13 +1,19 @@
 import {
+  type AuditLogListRecord,
+  type DashboardAnalyticsRecord,
+  type ProjectAccessRecord,
+  type ProjectMembershipRecord,
   type ProjectRecord,
   type ToolDefinitionRecord,
   type WorkflowRecord,
+  type WorkflowRestoreResponseRecord,
   type WorkflowRunDetailRecord,
   type WorkflowRunRecord,
   type WorkflowRunRetryPayload,
   type WorkflowRunStepRetryPayload,
   type WorkflowRunTriggerPayload,
   type WorkflowSavePayload,
+  type WorkflowVersionRecord,
 } from "@/types/workflow";
 import { getLocalAuthUserId } from "@/store/auth-store";
 
@@ -28,7 +34,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(errorPayload?.detail ?? `Request failed with status ${response.status}`);
   }
 
-  return (await response.json()) as T;
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const raw = await response.text();
+  if (!raw) {
+    return undefined as T;
+  }
+  return JSON.parse(raw) as T;
 }
 
 export function getProjects(): Promise<ProjectRecord[]> {
@@ -52,7 +66,7 @@ export function getWorkflows(projectId: string): Promise<WorkflowRecord[]> {
 
 export function createWorkflow(
   projectId: string,
-  payload: { name: string; description?: string | null },
+  payload: { name: string; description?: string | null; tags?: string[] },
 ): Promise<WorkflowRecord> {
   return request<WorkflowRecord>(`/projects/${projectId}/workflows`, {
     method: "POST",
@@ -118,4 +132,119 @@ export function retryWorkflowRun(
 
 export function getTools(): Promise<ToolDefinitionRecord[]> {
   return request<ToolDefinitionRecord[]>("/tools");
+}
+
+export function getProjectAccess(projectId: string): Promise<ProjectAccessRecord> {
+  return request<ProjectAccessRecord>(`/projects/${projectId}/access`);
+}
+
+export function getProjectMembers(projectId: string): Promise<ProjectMembershipRecord[]> {
+  return request<ProjectMembershipRecord[]>(`/projects/${projectId}/members`);
+}
+
+export function addProjectMember(
+  projectId: string,
+  payload: { email: string; display_name?: string | null; role: "owner" | "editor" | "viewer" },
+): Promise<ProjectMembershipRecord> {
+  return request<ProjectMembershipRecord>(`/projects/${projectId}/members`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateProjectMemberRole(
+  projectId: string,
+  membershipId: string,
+  payload: { role: "owner" | "editor" | "viewer" },
+): Promise<ProjectMembershipRecord> {
+  return request<ProjectMembershipRecord>(`/projects/${projectId}/members/${membershipId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function removeProjectMember(projectId: string, membershipId: string): Promise<void> {
+  return request<void>(`/projects/${projectId}/members/${membershipId}`, {
+    method: "DELETE",
+  });
+}
+
+export function getProjectActivity(
+  projectId: string,
+  params: { limit?: number; action?: string } = {},
+): Promise<AuditLogListRecord> {
+  const query = new URLSearchParams();
+  if (typeof params.limit === "number") {
+    query.set("limit", String(params.limit));
+  }
+  if (params.action) {
+    query.set("action", params.action);
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request<AuditLogListRecord>(`/projects/${projectId}/activity${suffix}`);
+}
+
+export function duplicateWorkflow(
+  workflowId: string,
+  payload: { name?: string | null; description?: string | null; target_project_id?: string | null; publish_note?: string | null } = {},
+): Promise<WorkflowRecord> {
+  return request<WorkflowRecord>(`/workflows/${workflowId}/duplicate`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getWorkflowVersions(workflowId: string): Promise<WorkflowVersionRecord[]> {
+  return request<WorkflowVersionRecord[]>(`/workflows/${workflowId}/versions`);
+}
+
+export function publishWorkflowVersion(
+  workflowId: string,
+  payload: { note?: string | null } = {},
+): Promise<WorkflowVersionRecord> {
+  return request<WorkflowVersionRecord>(`/workflows/${workflowId}/versions/publish`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function restoreWorkflowVersion(
+  workflowId: string,
+  versionId: string,
+): Promise<WorkflowRestoreResponseRecord> {
+  return request<WorkflowRestoreResponseRecord>(`/workflows/${workflowId}/versions/${versionId}/restore`, {
+    method: "POST",
+  });
+}
+
+export function searchWorkflows(params: {
+  q?: string;
+  tag?: string;
+  tool?: string;
+  project_id?: string;
+}): Promise<WorkflowRecord[]> {
+  const query = new URLSearchParams();
+  if (params.q) {
+    query.set("q", params.q);
+  }
+  if (params.tag) {
+    query.set("tag", params.tag);
+  }
+  if (params.tool) {
+    query.set("tool", params.tool);
+  }
+  if (params.project_id) {
+    query.set("project_id", params.project_id);
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request<WorkflowRecord[]>(`/workflows/search${suffix}`);
+}
+
+export function getDashboardAnalytics(params: { project_id?: string } = {}): Promise<DashboardAnalyticsRecord> {
+  const query = new URLSearchParams();
+  if (params.project_id) {
+    query.set("project_id", params.project_id);
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request<DashboardAnalyticsRecord>(`/analytics/dashboard${suffix}`);
 }

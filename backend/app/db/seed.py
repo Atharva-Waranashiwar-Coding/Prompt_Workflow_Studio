@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
+from app.models.collaboration import ProjectMembership
 from app.models.project import Project
 from app.models.tool_data import ToolDocument, ToolTemplate
 from app.models.workflow import Workflow, WorkflowEdge, WorkflowNode
@@ -73,6 +74,14 @@ def seed_sample_data() -> None:
         project = Project(user_id=user.id, name="Sample Support Project", description="Seeded example project")
         db.add(project)
         db.flush()
+        db.add(
+            ProjectMembership(
+                project_id=project.id,
+                user_id=user.id,
+                role="owner",
+                added_by_user_id=user.id,
+            )
+        )
 
         workflow = Workflow(project_id=project.id, name="Sample Triage Workflow", description="Prompt -> Condition -> Output")
         db.add(workflow)

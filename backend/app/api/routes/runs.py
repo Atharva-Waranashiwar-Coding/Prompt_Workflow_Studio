@@ -21,9 +21,25 @@ from app.services.execution_service import (
     retry_workflow_run,
     retry_workflow_run_step,
 )
+from app.services.access_service import ROLE_EDITOR, require_project_access
 from app.services.workflow_service import get_workflow_for_user
 
 router = APIRouter(tags=["workflow-runs"])
+
+
+def _require_project_access_or_http(
+    db: Session,
+    *,
+    project_id: UUID,
+    user_id: UUID,
+    minimum_role: str = "viewer",
+):
+    try:
+        return require_project_access(db, project_id=project_id, user_id=user_id, minimum_role=minimum_role)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = status.HTTP_403_FORBIDDEN if "Insufficient project permissions" in message else status.HTTP_404_NOT_FOUND
+        raise HTTPException(status_code=status_code, detail=message) from exc
 
 
 @router.get("/workflows/{workflow_id}/runs", response_model=list[WorkflowRunRead])
@@ -49,6 +65,12 @@ def post_workflow_run(
     workflow = get_workflow_for_user(db, workflow_id=workflow_id, user_id=current_user.id)
     if workflow is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    _require_project_access_or_http(
+        db,
+        project_id=workflow.project_id,
+        user_id=current_user.id,
+        minimum_role=ROLE_EDITOR,
+    )
 
     try:
         run = execute_workflow_run(
@@ -88,6 +110,16 @@ def post_cancel_workflow_run(
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow run not found")
 
+    workflow = get_workflow_for_run_for_user(db, workflow_id=run.workflow_id, user_id=current_user.id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    _require_project_access_or_http(
+        db,
+        project_id=workflow.project_id,
+        user_id=current_user.id,
+        minimum_role=ROLE_EDITOR,
+    )
+
     try:
         return cancel_workflow_run(db, run=run, user_id=current_user.id)
     except ValueError as exc:
@@ -108,6 +140,12 @@ def post_retry_workflow_run(
     workflow = get_workflow_for_run_for_user(db, workflow_id=run.workflow_id, user_id=current_user.id)
     if workflow is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    _require_project_access_or_http(
+        db,
+        project_id=workflow.project_id,
+        user_id=current_user.id,
+        minimum_role=ROLE_EDITOR,
+    )
 
     try:
         retried_run = retry_workflow_run(
@@ -145,6 +183,12 @@ def post_retry_workflow_run_step(
     workflow = get_workflow_for_run_for_user(db, workflow_id=run.workflow_id, user_id=current_user.id)
     if workflow is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    _require_project_access_or_http(
+        db,
+        project_id=workflow.project_id,
+        user_id=current_user.id,
+        minimum_role=ROLE_EDITOR,
+    )
 
     try:
         retried_run = retry_workflow_run_step(

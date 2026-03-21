@@ -13,9 +13,10 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.celery_app import celery_app
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.models.project import Project
 from app.models.run import WorkflowRun, WorkflowRunStep
 from app.models.workflow import Workflow, WorkflowEdge, WorkflowNode
+from app.services.access_service import get_project_access
+from app.services.audit_service import record_audit_log
 from app.services.memory_service import normalize_memory_scope, read_memory_entry, write_memory_entry
 from app.services.tool_service import invoke_tool_by_name
 from app.services.validator_service import validate_payload
@@ -782,6 +783,21 @@ def _execute_run(
                         "resolved_tool_params": resolved_params,
                     }
                 )
+                record_audit_log(
+                    db,
+                    action="tool.executed",
+                    entity_type="workflow_run_step",
+                    entity_id=str(step.id),
+                    project_id=workflow.project_id,
+                    workflow_id=workflow.id,
+                    run_id=run.id,
+                    user_id=run.triggered_by_user_id,
+                    metadata={
+                        "node_id": str(node.id),
+                        "node_label": node.label,
+                        "tool_name": (node.config or {}).get("toolName"),
+                    },
+                )
                 next_node_id = _next_node_for_non_condition(graph, node.id)
 
             elif node.node_type == "memory_read":
@@ -908,6 +924,20 @@ def execute_workflow_run(
 
     try:
         run.celery_task_id = _enqueue_run_task(run)
+        record_audit_log(
+            db,
+            action="run.started",
+            entity_type="workflow_run",
+            entity_id=str(run.id),
+            project_id=workflow.project_id,
+            workflow_id=workflow.id,
+            run_id=run.id,
+            user_id=user_id,
+            metadata={
+                "status": run.status,
+                "retry_count": run.retry_count,
+            },
+        )
         db.commit()
     except Exception as exc:
         _mark_run_terminal(run, RUN_STATUS_FAILED, f"Failed to enqueue workflow run: {exc}")
@@ -952,6 +982,21 @@ def retry_workflow_run(
 
     try:
         run.celery_task_id = _enqueue_run_task(run)
+        record_audit_log(
+            db,
+            action="run.started",
+            entity_type="workflow_run",
+            entity_id=str(run.id),
+            project_id=workflow.project_id,
+            workflow_id=workflow.id,
+            run_id=run.id,
+            user_id=user_id,
+            metadata={
+                "status": run.status,
+                "retry_count": run.retry_count,
+                "source_run_id": str(source_run.id),
+            },
+        )
         db.commit()
     except Exception as exc:
         _mark_run_terminal(run, RUN_STATUS_FAILED, f"Failed to enqueue retry run: {exc}")
@@ -1013,6 +1058,22 @@ def retry_workflow_run_step(
 
     try:
         run.celery_task_id = _enqueue_run_task(run)
+        record_audit_log(
+            db,
+            action="run.started",
+            entity_type="workflow_run",
+            entity_id=str(run.id),
+            project_id=workflow.project_id,
+            workflow_id=workflow.id,
+            run_id=run.id,
+            user_id=user_id,
+            metadata={
+                "status": run.status,
+                "retry_count": run.retry_count,
+                "source_run_id": str(source_run.id),
+                "source_step_id": str(retry_step.id),
+            },
+        )
         db.commit()
     except Exception as exc:
         _mark_run_terminal(run, RUN_STATUS_FAILED, f"Failed to enqueue step retry run: {exc}")
@@ -1032,8 +1093,21 @@ def cancel_workflow_run(db: Session, run: WorkflowRun, user_id: UUID) -> Workflo
             raise ValueError("Workflow run not found after cancellation request.")
         return detailed_run
 
+    workflow = db.get(Workflow, run.workflow_id)
+
     run.cancel_requested_at = _utcnow()
     _mark_run_terminal(run, RUN_STATUS_CANCELLED, "Run was cancelled by user request.")
+    record_audit_log(
+        db,
+        action="run.cancelled",
+        entity_type="workflow_run",
+        entity_id=str(run.id),
+        project_id=workflow.project_id if workflow is not None else None,
+        workflow_id=run.workflow_id,
+        run_id=run.id,
+        user_id=user_id,
+        metadata={"status": run.status},
+    )
 
     try:
         if run.celery_task_id:
@@ -1107,13 +1181,13 @@ def run_workflow_run_in_worker(
 
 
 def list_workflow_runs_for_user(db: Session, workflow_id: UUID, user_id: UUID) -> list[WorkflowRun]:
-    stmt = (
-        select(WorkflowRun)
-        .join(Workflow, Workflow.id == WorkflowRun.workflow_id)
-        .join(Project, Project.id == Workflow.project_id)
-        .where(WorkflowRun.workflow_id == workflow_id, Project.user_id == user_id)
-        .order_by(WorkflowRun.created_at.desc())
-    )
+    workflow = db.get(Workflow, workflow_id)
+    if workflow is None:
+        return []
+    if get_project_access(db, project_id=workflow.project_id, user_id=user_id) is None:
+        return []
+
+    stmt = select(WorkflowRun).where(WorkflowRun.workflow_id == workflow_id).order_by(WorkflowRun.created_at.desc())
     return list(db.scalars(stmt).all())
 
 
@@ -1123,24 +1197,33 @@ def get_workflow_run_for_user(
     user_id: UUID,
     with_steps: bool = True,
 ) -> WorkflowRun | None:
-    stmt = (
-        select(WorkflowRun)
-        .join(Workflow, Workflow.id == WorkflowRun.workflow_id)
-        .join(Project, Project.id == Workflow.project_id)
-        .where(WorkflowRun.id == run_id, Project.user_id == user_id)
-    )
+    stmt = select(WorkflowRun).where(WorkflowRun.id == run_id)
 
     if with_steps:
         stmt = stmt.options(selectinload(WorkflowRun.steps))
 
-    return db.scalar(stmt)
+    run = db.scalar(stmt)
+    if run is None:
+        return None
+
+    workflow = db.get(Workflow, run.workflow_id)
+    if workflow is None:
+        return None
+    if get_project_access(db, project_id=workflow.project_id, user_id=user_id) is None:
+        return None
+
+    return run
 
 
 def get_workflow_for_run_for_user(db: Session, workflow_id: UUID, user_id: UUID) -> Workflow | None:
     stmt = (
         select(Workflow)
-        .join(Project, Project.id == Workflow.project_id)
-        .where(Workflow.id == workflow_id, Project.user_id == user_id)
+        .where(Workflow.id == workflow_id)
         .options(selectinload(Workflow.nodes), selectinload(Workflow.edges))
     )
-    return db.scalar(stmt)
+    workflow = db.scalar(stmt)
+    if workflow is None:
+        return None
+    if get_project_access(db, project_id=workflow.project_id, user_id=user_id) is None:
+        return None
+    return workflow

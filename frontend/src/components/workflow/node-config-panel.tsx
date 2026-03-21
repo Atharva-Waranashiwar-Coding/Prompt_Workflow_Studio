@@ -23,7 +23,11 @@ function parseJsonArray(text: string, label: string): Array<Record<string, unkno
   return parsed.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
 }
 
-export function NodeConfigPanel() {
+type NodeConfigPanelProps = {
+  readOnly?: boolean;
+};
+
+export function NodeConfigPanel({ readOnly = false }: NodeConfigPanelProps) {
   const selectedNodeId = useWorkflowBuilderStore((state) => state.selectedNodeId);
   const selectedNode = useWorkflowBuilderStore((state) =>
     state.selectedNodeId ? state.nodesById[state.selectedNodeId] : null,
@@ -87,7 +91,8 @@ export function NodeConfigPanel() {
       <CardHeader>
         <CardTitle className="text-base">{selectedNode.nodeType.toUpperCase()} Settings</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent>
+        <fieldset disabled={readOnly} className="space-y-4 disabled:cursor-not-allowed disabled:opacity-80">
         <div className="space-y-1.5">
           <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Label</label>
           <Input
@@ -374,6 +379,7 @@ export function NodeConfigPanel() {
             </label>
           </>
         )}
+        </fieldset>
       </CardContent>
     </Card>
   );

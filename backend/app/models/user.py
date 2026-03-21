@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.collaboration import ProjectMembership
     from app.models.project import Project
 
 
@@ -21,3 +22,8 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     projects: Mapped[list["Project"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    project_memberships: Mapped[list["ProjectMembership"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="ProjectMembership.user_id",
+    )

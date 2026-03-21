@@ -1,22 +1,35 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  addProjectMember,
   cancelWorkflowRun,
   createProject,
   createWorkflow,
+  duplicateWorkflow,
   executeWorkflow,
+  getDashboardAnalytics,
+  getProjectAccess,
+  getProjectActivity,
+  getProjectMembers,
   getProject,
   getProjects,
   getTools,
   getWorkflow,
   getWorkflowRun,
   getWorkflowRuns,
+  getWorkflowVersions,
   getWorkflows,
+  publishWorkflowVersion,
+  removeProjectMember,
   retryWorkflowRun,
   retryWorkflowRunStep,
+  restoreWorkflowVersion,
   saveWorkflow,
+  searchWorkflows,
+  updateProjectMemberRole,
 } from "@/lib/api";
 import {
+  type ProjectRole,
   type WorkflowRunRecord,
   type WorkflowRunRetryPayload,
   type WorkflowRunStepRetryPayload,
@@ -27,10 +40,17 @@ import {
 export const queryKeys = {
   projects: ["projects"] as const,
   project: (projectId: string) => ["projects", projectId] as const,
+  projectAccess: (projectId: string) => ["projects", projectId, "access"] as const,
+  projectMembers: (projectId: string) => ["projects", projectId, "members"] as const,
+  projectActivity: (projectId: string) => ["projects", projectId, "activity"] as const,
   workflows: (projectId: string) => ["projects", projectId, "workflows"] as const,
+  workflowSearch: (projectId: string | undefined, q: string, tag: string, tool: string) =>
+    ["workflows", "search", projectId ?? "all", q, tag, tool] as const,
   workflow: (workflowId: string) => ["workflows", workflowId] as const,
+  workflowVersions: (workflowId: string) => ["workflows", workflowId, "versions"] as const,
   workflowRuns: (workflowId: string) => ["workflows", workflowId, "runs"] as const,
   workflowRun: (runId: string) => ["workflow-runs", runId] as const,
+  dashboardAnalytics: (projectId: string | undefined) => ["analytics", "dashboard", projectId ?? "all"] as const,
   tools: ["tools"] as const,
 };
 
@@ -79,11 +99,12 @@ export function useWorkflowsQuery(projectId: string | undefined) {
 export function useCreateWorkflowMutation(projectId: string | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { name: string; description?: string | null }) =>
+    mutationFn: (payload: { name: string; description?: string | null; tags?: string[] }) =>
       createWorkflow(projectId as string, payload),
     onSuccess: (createdWorkflow) => {
       if (projectId) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.workflows(projectId) });
+        void queryClient.invalidateQueries({ queryKey: ["workflows", "search", projectId] });
       }
       void queryClient.setQueryData(queryKeys.workflow(createdWorkflow.id), createdWorkflow);
     },
@@ -106,8 +127,27 @@ export function useSaveWorkflowMutation(workflowId: string | undefined, projectI
       void queryClient.setQueryData(queryKeys.workflow(savedWorkflow.id), savedWorkflow);
       if (projectId) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.workflows(projectId) });
+        void queryClient.invalidateQueries({ queryKey: ["workflows", "search", projectId] });
       }
     },
+  });
+}
+
+export function useWorkflowSearchQuery(
+  projectId: string | undefined,
+  params: { q: string; tag: string; tool: string; enabled?: boolean },
+) {
+  const enabled = params.enabled ?? true;
+  return useQuery({
+    queryKey: queryKeys.workflowSearch(projectId, params.q, params.tag, params.tool),
+    queryFn: () =>
+      searchWorkflows({
+        project_id: projectId,
+        q: params.q || undefined,
+        tag: params.tag || undefined,
+        tool: params.tool || undefined,
+      }),
+    enabled: Boolean(projectId) && enabled,
   });
 }
 
@@ -197,5 +237,135 @@ export function useToolsQuery() {
     queryKey: queryKeys.tools,
     queryFn: getTools,
     staleTime: 60_000,
+  });
+}
+
+export function useProjectAccessQuery(projectId: string | undefined) {
+  return useQuery({
+    queryKey: projectId ? queryKeys.projectAccess(projectId) : ["projects", "missing", "access"],
+    queryFn: () => getProjectAccess(projectId as string),
+    enabled: Boolean(projectId),
+  });
+}
+
+export function useProjectMembersQuery(projectId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: projectId ? queryKeys.projectMembers(projectId) : ["projects", "missing", "members"],
+    queryFn: () => getProjectMembers(projectId as string),
+    enabled: Boolean(projectId) && enabled,
+  });
+}
+
+export function useAddProjectMemberMutation(projectId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { email: string; display_name?: string | null; role: ProjectRole }) =>
+      addProjectMember(projectId as string, payload),
+    onSuccess: () => {
+      if (!projectId) {
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectMembers(projectId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectActivity(projectId) });
+    },
+  });
+}
+
+export function useUpdateProjectMemberRoleMutation(projectId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { membershipId: string; role: ProjectRole }) =>
+      updateProjectMemberRole(projectId as string, payload.membershipId, { role: payload.role }),
+    onSuccess: () => {
+      if (!projectId) {
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectMembers(projectId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectActivity(projectId) });
+    },
+  });
+}
+
+export function useRemoveProjectMemberMutation(projectId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (membershipId: string) => removeProjectMember(projectId as string, membershipId),
+    onSuccess: () => {
+      if (!projectId) {
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectMembers(projectId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectActivity(projectId) });
+    },
+  });
+}
+
+export function useProjectActivityQuery(projectId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: projectId ? queryKeys.projectActivity(projectId) : ["projects", "missing", "activity"],
+    queryFn: () => getProjectActivity(projectId as string, { limit: 20 }),
+    enabled: Boolean(projectId) && enabled,
+  });
+}
+
+export function useDuplicateWorkflowMutation(projectId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { workflowId: string; name?: string | null }) =>
+      duplicateWorkflow(payload.workflowId, {
+        name: payload.name,
+      }),
+    onSuccess: (workflow) => {
+      if (projectId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workflows(projectId) });
+        void queryClient.invalidateQueries({ queryKey: ["workflows", "search", projectId] });
+      }
+      void queryClient.setQueryData(queryKeys.workflow(workflow.id), workflow);
+    },
+  });
+}
+
+export function useWorkflowVersionsQuery(workflowId: string | undefined) {
+  return useQuery({
+    queryKey: workflowId ? queryKeys.workflowVersions(workflowId) : ["workflows", "missing", "versions"],
+    queryFn: () => getWorkflowVersions(workflowId as string),
+    enabled: Boolean(workflowId),
+  });
+}
+
+export function usePublishWorkflowVersionMutation(workflowId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { note?: string | null } = {}) => publishWorkflowVersion(workflowId as string, payload),
+    onSuccess: () => {
+      if (workflowId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workflowVersions(workflowId) });
+      }
+    },
+  });
+}
+
+export function useRestoreWorkflowVersionMutation(workflowId: string | undefined, projectId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (versionId: string) => restoreWorkflowVersion(workflowId as string, versionId),
+    onSuccess: (response) => {
+      const workflow = response.workflow;
+      void queryClient.setQueryData(queryKeys.workflow(workflow.id), workflow);
+      if (workflowId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workflowVersions(workflowId) });
+      }
+      if (projectId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workflows(projectId) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.projectActivity(projectId) });
+      }
+    },
+  });
+}
+
+export function useDashboardAnalyticsQuery(projectId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.dashboardAnalytics(projectId),
+    queryFn: () => getDashboardAnalytics({ project_id: projectId }),
   });
 }

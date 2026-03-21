@@ -10,6 +10,7 @@ NodeType = Literal["prompt", "condition", "output", "tool", "memory_read", "memo
 class WorkflowCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
+    tags: list[str] = Field(default_factory=list)
 
 
 class WorkflowNodePayload(BaseModel):
@@ -34,6 +35,7 @@ class WorkflowEdgePayload(BaseModel):
 class WorkflowSaveRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
+    tags: list[str] = Field(default_factory=list)
     nodes: list[WorkflowNodePayload] = Field(default_factory=list)
     edges: list[WorkflowEdgePayload] = Field(default_factory=list)
 
@@ -45,6 +47,7 @@ class WorkflowRead(BaseModel):
     project_id: UUID
     name: str
     description: str | None
+    tags: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     nodes: list[WorkflowNodePayload]

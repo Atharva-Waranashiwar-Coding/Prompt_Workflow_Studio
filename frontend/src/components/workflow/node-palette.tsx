@@ -2,6 +2,7 @@ import { Database, FileCode, GitBranch, MonitorSmartphone, ShieldCheck, Wrench }
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { useWorkflowBuilderStore } from "@/store/workflow-builder-store";
 
 const nodeOptions = [
@@ -49,7 +50,11 @@ const nodeOptions = [
   },
 ];
 
-export function NodePalette() {
+type NodePaletteProps = {
+  readOnly?: boolean;
+};
+
+export function NodePalette({ readOnly = false }: NodePaletteProps) {
   const addNode = useWorkflowBuilderStore((state) => state.addNode);
 
   return (
@@ -64,7 +69,8 @@ export function NodePalette() {
             <Button
               key={option.type}
               variant="secondary"
-              className="h-auto w-full justify-start gap-3 p-3 text-left"
+              className={cn("h-auto w-full justify-start gap-3 p-3 text-left", readOnly && "cursor-not-allowed opacity-60")}
+              disabled={readOnly}
               onClick={() => addNode(option.type)}
             >
               <Icon className="h-4 w-4 text-brand-600" />

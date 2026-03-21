@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "@/components/layout/app-shell";
+import { DashboardPage } from "@/pages/dashboard-page";
 import { ProjectsPage } from "@/pages/projects-page";
 import { WorkflowBuilderPage } from "@/pages/workflow-builder-page";
 import { WorkflowRunDetailPage } from "@/pages/workflow-run-detail-page";
@@ -12,6 +13,7 @@ export default function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route path="/" element={<ProjectsPage />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/projects/:projectId" element={<WorkflowsPage />} />
         <Route path="/projects/:projectId/workflows/:workflowId" element={<WorkflowBuilderPage />} />
         <Route path="/projects/:projectId/workflows/:workflowId/runs" element={<WorkflowRunsPage />} />

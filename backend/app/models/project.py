@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.collaboration import ProjectMembership
     from app.models.user import User
     from app.models.workflow import Workflow
 
@@ -27,3 +28,7 @@ class Project(Base):
 
     user: Mapped["User"] = relationship(back_populates="projects")
     workflows: Mapped[list["Workflow"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    memberships: Mapped[list["ProjectMembership"]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )

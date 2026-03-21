@@ -27,6 +27,7 @@ export type WorkflowBuilderState = {
   projectId: string | null;
   name: string;
   description: string;
+  tags: string[];
   nodesById: Record<string, WorkflowNodeEntity>;
   nodeOrder: string[];
   edgesById: Record<string, WorkflowEdgeEntity>;
@@ -37,6 +38,7 @@ export type WorkflowBuilderState = {
   clear: () => void;
   setWorkflowName: (name: string) => void;
   setWorkflowDescription: (description: string) => void;
+  setWorkflowTags: (tags: string[]) => void;
   addNode: (nodeType: NodeType) => void;
   updateNode: (nodeId: string, patch: Partial<Pick<WorkflowNodeEntity, "label" | "config">>) => void;
   onNodesChange: (changes: NodeChange[]) => void;
@@ -210,6 +212,7 @@ const initialState = {
   projectId: null,
   name: "",
   description: "",
+  tags: [] as string[],
   nodesById: {} as Record<string, WorkflowNodeEntity>,
   nodeOrder: [] as string[],
   edgesById: {} as Record<string, WorkflowEdgeEntity>,
@@ -247,6 +250,7 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
       projectId: workflow.project_id,
       name: workflow.name,
       description: workflow.description ?? "",
+      tags: workflow.tags ?? [],
       nodesById: normalizedNodes.nodesById,
       nodeOrder: normalizedNodes.nodeOrder,
       edgesById: normalizedEdges.edgesById,
@@ -266,6 +270,13 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
 
   setWorkflowDescription: (description) => {
     set({ description, isDirty: true });
+  },
+
+  setWorkflowTags: (tags) => {
+    const normalized = tags
+      .map((tag) => tag.trim().toLowerCase())
+      .filter((tag, index, array) => Boolean(tag) && array.indexOf(tag) === index);
+    set({ tags: normalized, isDirty: true });
   },
 
   addNode: (nodeType) => {
@@ -399,6 +410,7 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
     return {
       name: state.name,
       description: state.description || null,
+      tags: state.tags,
       nodes,
       edges,
     };

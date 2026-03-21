@@ -74,7 +74,11 @@ const nodeTypes = {
   validator: WorkflowNodeCard,
 };
 
-export function WorkflowCanvas() {
+type WorkflowCanvasProps = {
+  readOnly?: boolean;
+};
+
+export function WorkflowCanvas({ readOnly = false }: WorkflowCanvasProps) {
   const nodes = useWorkflowBuilderStore((state) => state.getReactFlowNodes());
   const edges = useWorkflowBuilderStore((state) => state.getReactFlowEdges());
   const onNodesChange = useWorkflowBuilderStore((state) => state.onNodesChange);
@@ -90,9 +94,12 @@ export function WorkflowCanvas() {
         nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{ padding: 0.25 }}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
+        nodesDraggable={!readOnly}
+        nodesConnectable={!readOnly}
+        elementsSelectable
+        onNodesChange={readOnly ? undefined : onNodesChange}
+        onEdgesChange={readOnly ? undefined : onEdgesChange}
+        onConnect={readOnly ? undefined : onConnect}
         onPaneClick={() => selectNode(null)}
         onNodeClick={(_, node) => selectNode(node.id)}
       >

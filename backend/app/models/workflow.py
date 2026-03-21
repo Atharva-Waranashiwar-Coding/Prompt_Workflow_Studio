@@ -11,6 +11,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.project import Project
     from app.models.run import WorkflowRun
+    from app.models.versioning import WorkflowTag, WorkflowVersion
 
 
 class Workflow(Base):
@@ -43,6 +44,20 @@ class Workflow(Base):
         cascade="all, delete-orphan",
         order_by="WorkflowRun.created_at",
     )
+    versions: Mapped[list["WorkflowVersion"]] = relationship(
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        order_by="WorkflowVersion.version_number.desc()",
+    )
+    tag_links: Mapped[list["WorkflowTag"]] = relationship(
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        order_by="WorkflowTag.created_at",
+    )
+
+    @property
+    def tags(self) -> list[str]:
+        return [link.tag.name for link in self.tag_links if link.tag]
 
 
 class WorkflowNode(Base):

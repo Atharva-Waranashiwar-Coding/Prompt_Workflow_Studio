@@ -77,6 +77,7 @@ export interface WorkflowRecord {
   project_id: string;
   name: string;
   description: string | null;
+  tags: string[];
   created_at: string;
   updated_at: string;
   nodes: WorkflowApiNode[];
@@ -95,6 +96,7 @@ export interface ProjectRecord {
 export interface WorkflowSavePayload {
   name: string;
   description: string | null;
+  tags: string[];
   nodes: WorkflowApiNode[];
   edges: WorkflowApiEdge[];
 }
@@ -191,4 +193,99 @@ export interface ToolDefinitionRecord {
   description: string;
   parameter_schema: Record<string, unknown>;
   default_params: Record<string, unknown>;
+}
+
+export type ProjectRole = "owner" | "editor" | "viewer";
+
+export interface ProjectAccessRecord {
+  project_id: string;
+  role: ProjectRole;
+  can_edit: boolean;
+  can_manage_members: boolean;
+  can_run: boolean;
+}
+
+export interface ProjectMembershipRecord {
+  id: string;
+  project_id: string;
+  user_id: string;
+  role: ProjectRole;
+  added_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+  user_email: string;
+  user_display_name: string;
+}
+
+export interface WorkflowVersionRecord {
+  id: string;
+  workflow_id: string;
+  version_number: number;
+  name: string;
+  description: string | null;
+  nodes_snapshot: Array<Record<string, unknown>>;
+  edges_snapshot: Array<Record<string, unknown>>;
+  tags_snapshot: string[];
+  published_by_user_id: string | null;
+  publish_note: string | null;
+  created_at: string;
+}
+
+export interface WorkflowRestoreResponseRecord {
+  workflow: WorkflowRecord;
+  restored_from_version_id: string;
+}
+
+export interface AuditLogRecord {
+  id: string;
+  project_id: string | null;
+  workflow_id: string | null;
+  run_id: string | null;
+  user_id: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  metadata_json: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface AuditLogListRecord {
+  items: AuditLogRecord[];
+  total: number;
+}
+
+export interface RunStatusCountsRecord {
+  total: number;
+  queued: number;
+  running: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  timed_out: number;
+}
+
+export interface ToolUsageRecord {
+  tool_name: string;
+  count: number;
+}
+
+export interface RecentActivityRecord {
+  id: string;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  project_id: string | null;
+  workflow_id: string | null;
+  run_id: string | null;
+  user_id: string | null;
+  created_at: string;
+}
+
+export interface DashboardAnalyticsRecord {
+  total_projects: number;
+  total_workflows: number;
+  run_counts: RunStatusCountsRecord;
+  failed_runs: number;
+  most_used_tools: ToolUsageRecord[];
+  recent_activity: RecentActivityRecord[];
 }
