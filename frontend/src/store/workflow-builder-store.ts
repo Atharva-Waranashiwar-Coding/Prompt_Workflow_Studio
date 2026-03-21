@@ -101,6 +101,13 @@ function cloneConfig(config: WorkflowNodeConfig): WorkflowNodeConfig {
   }
 }
 
+function normalizeNodeConfig(config: unknown): WorkflowNodeConfig {
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    return {};
+  }
+  return config as WorkflowNodeConfig;
+}
+
 function defaultConfig(nodeType: NodeType): WorkflowNodeConfig {
   if (nodeType === "prompt") {
     return { promptTemplate: "Generate a response based on the current context." };
@@ -185,19 +192,24 @@ function entityNodeToReactFlowNode(node: WorkflowNodeEntity): Node<WorkflowReact
     data: {
       label: node.label,
       nodeType: node.nodeType,
-      config: node.config,
+      config: normalizeNodeConfig(node.config),
     },
   };
 }
 
 function reactFlowNodeToEntity(node: Node<WorkflowReactNodeData>): WorkflowNodeEntity {
-  const nodeType = (node.type ?? node.data.nodeType) as NodeType;
+  const nodeData = node.data ?? {
+    label: "Node",
+    nodeType: "output" as NodeType,
+    config: {},
+  };
+  const nodeType = (node.type ?? nodeData.nodeType) as NodeType;
   return {
     id: node.id,
     nodeType,
-    label: node.data.label,
+    label: nodeData.label,
     position: node.position,
-    config: node.data.config,
+    config: normalizeNodeConfig(nodeData.config),
   };
 }
 
@@ -271,7 +283,7 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
       nodeType: node.node_type,
       label: node.label,
       position: { x: node.position_x, y: node.position_y },
-      config: node.config ?? {},
+      config: normalizeNodeConfig(node.config),
     }));
     const edges: WorkflowEdgeEntity[] = workflow.edges.map((edge) => ({
       id: edge.id,
@@ -655,12 +667,19 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
 
   getReactFlowNodes: () => {
     const state = get();
-    return state.nodeOrder.map((nodeId) => entityNodeToReactFlowNode(state.nodesById[nodeId]));
+    return state.nodeOrder
+      .map((nodeId) => state.nodesById[nodeId])
+      .filter((node): node is WorkflowNodeEntity => Boolean(node))
+      .map((node) => entityNodeToReactFlowNode(node));
   },
 
   getReactFlowEdges: () => {
     const state = get();
-    return state.edgeOrder.map((edgeId) => entityEdgeToReactFlowEdge(state.edgesById[edgeId]));
+    return state.edgeOrder
+      .map((edgeId) => state.edgesById[edgeId])
+      .filter((edge): edge is WorkflowEdgeEntity => Boolean(edge))
+      .filter((edge) => Boolean(state.nodesById[edge.source]) && Boolean(state.nodesById[edge.target]))
+      .map((edge) => entityEdgeToReactFlowEdge(edge));
   },
 
   toSavePayload: () => {

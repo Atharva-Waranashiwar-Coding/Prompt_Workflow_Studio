@@ -62,7 +62,7 @@ services:
       context: ./backend
     container_name: pws-celery-worker
     working_dir: /app
-    command: sh -c "alembic upgrade head && celery -A app.core.celery_app:celery_app worker --loglevel=info -Q workflow_runs --concurrency=1"
+    command: sh -c "celery -A app.core.celery_app:celery_app worker --loglevel=info -Q workflow_runs --concurrency=1"
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/prompt_workflow_studio
       REDIS_URL: redis://redis:6379/0

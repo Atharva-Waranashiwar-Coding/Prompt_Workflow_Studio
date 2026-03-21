@@ -63,6 +63,11 @@ __pycache__/
 node_modules/
 frontend/node_modules/
 frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/tailwind.config.d.ts
+frontend/vite.config.js
+frontend/tailwind.config.js
 
 # Alembic cache
 backend/.pytest_cache/

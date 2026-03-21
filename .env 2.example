@@ -1,8 +1,0 @@
-POSTGRES_DB=prompt_workflow_studio
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-DATABASE_URL=postgresql+psycopg://postgres:postgres@postgres:5432/prompt_workflow_studio
-CORS_ORIGINS=http://localhost:5173
-VITE_API_URL=http://localhost:8000/api
-DEFAULT_USER_EMAIL=dev@promptworkflow.local
-DEFAULT_USER_NAME=Dev User

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   Background,
   Controls,
@@ -18,25 +19,58 @@ import { WORKFLOW_TEMPLATES } from "@/lib/workflow-templates";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useWorkflowBuilderStore } from "@/store/workflow-builder-store";
-import { type WorkflowReactNodeData } from "@/types/workflow";
+import {
+  type WorkflowEdgeEntity,
+  type WorkflowNodeEntity,
+  type WorkflowReactNodeData,
+} from "@/types/workflow";
+
+function entityNodeToReactFlowNode(node: WorkflowNodeEntity): Node<WorkflowReactNodeData> {
+  return {
+    id: node.id,
+    type: node.nodeType,
+    position: node.position,
+    data: {
+      label: node.label,
+      nodeType: node.nodeType,
+      config: node.config ?? {},
+    },
+  };
+}
+
+function entityEdgeToReactFlowEdge(edge: WorkflowEdgeEntity) {
+  return {
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    sourceHandle: edge.sourceHandle ?? undefined,
+    targetHandle: edge.targetHandle ?? undefined,
+    label: edge.label ?? undefined,
+    data: edge.data ?? undefined,
+  };
+}
 
 function previewNodeConfig(data: WorkflowReactNodeData): string {
+  const config =
+    data.config && typeof data.config === "object" && !Array.isArray(data.config)
+      ? data.config
+      : {};
   if (data.nodeType === "prompt") {
-    return String(data.config.promptTemplate ?? "").slice(0, 36) || "Prompt template";
+    return String(config.promptTemplate ?? "").slice(0, 36) || "Prompt template";
   }
   if (data.nodeType === "condition") {
-    return String(data.config.conditionExpression ?? "").slice(0, 36) || "Condition rule";
+    return String(config.conditionExpression ?? "").slice(0, 36) || "Condition rule";
   }
   if (data.nodeType === "tool") {
-    return String(data.config.toolName ?? "Select tool");
+    return String(config.toolName ?? "Select tool");
   }
   if (data.nodeType === "memory_read" || data.nodeType === "memory_write") {
-    return String(data.config.memoryKey ?? "memory.key");
+    return String(config.memoryKey ?? "memory.key");
   }
   if (data.nodeType === "validator") {
-    return String(data.config.targetPath ?? "last_output");
+    return String(config.targetPath ?? "last_output");
   }
-  return String(data.config.outputFormat ?? "text");
+  return String(config.outputFormat ?? "text");
 }
 
 function WorkflowNodeCard({ data, selected }: NodeProps<WorkflowReactNodeData>) {
@@ -152,8 +186,10 @@ type WorkflowCanvasProps = {
 };
 
 export function WorkflowCanvas({ readOnly = false }: WorkflowCanvasProps) {
-  const nodes = useWorkflowBuilderStore((state) => state.getReactFlowNodes());
-  const edges = useWorkflowBuilderStore((state) => state.getReactFlowEdges());
+  const nodeOrder = useWorkflowBuilderStore((state) => state.nodeOrder);
+  const nodesById = useWorkflowBuilderStore((state) => state.nodesById);
+  const edgeOrder = useWorkflowBuilderStore((state) => state.edgeOrder);
+  const edgesById = useWorkflowBuilderStore((state) => state.edgesById);
   const onNodesChange = useWorkflowBuilderStore((state) => state.onNodesChange);
   const onEdgesChange = useWorkflowBuilderStore((state) => state.onEdgesChange);
   const onConnect = useWorkflowBuilderStore((state) => state.onConnect);
@@ -162,6 +198,25 @@ export function WorkflowCanvas({ readOnly = false }: WorkflowCanvasProps) {
   const deleteSelectedNode = useWorkflowBuilderStore((state) => state.deleteSelectedNode);
   const duplicateSelectedNode = useWorkflowBuilderStore((state) => state.duplicateSelectedNode);
   const insertTemplate = useWorkflowBuilderStore((state) => state.insertTemplate);
+
+  const nodes = useMemo(
+    () =>
+      nodeOrder
+        .map((nodeId) => nodesById[nodeId])
+        .filter((node): node is WorkflowNodeEntity => Boolean(node))
+        .map(entityNodeToReactFlowNode),
+    [nodeOrder, nodesById],
+  );
+
+  const edges = useMemo(
+    () =>
+      edgeOrder
+        .map((edgeId) => edgesById[edgeId])
+        .filter((edge): edge is WorkflowEdgeEntity => Boolean(edge))
+        .filter((edge) => Boolean(nodesById[edge.source]) && Boolean(nodesById[edge.target]))
+        .map(entityEdgeToReactFlowEdge),
+    [edgeOrder, edgesById, nodesById],
+  );
 
   const hasNodes = nodes.length > 0;
 

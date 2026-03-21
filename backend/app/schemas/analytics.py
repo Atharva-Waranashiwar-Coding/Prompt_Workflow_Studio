@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class RunStatusCountsRead(BaseModel):
@@ -20,6 +20,8 @@ class ToolUsageRead(BaseModel):
 
 
 class RecentActivityRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     action: str
     entity_type: str

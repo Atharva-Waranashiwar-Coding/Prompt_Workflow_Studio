@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_v1_prefix: str = "/api"
     database_url: str = "postgresql+psycopg://postgres:postgres@postgres:5432/prompt_workflow_studio"
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    cors_origins: str | list[str] = "http://localhost:5173"
     default_user_email: str = "dev@promptworkflow.local"
     default_user_name: str = "Dev User"
     enable_mcp_tools: bool = True

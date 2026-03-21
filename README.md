@@ -187,6 +187,44 @@ After DB migration is applied, seed one sample project/workflow:
 docker compose exec backend python -m app.db.seed
 ```
 
+The seed script is idempotent and now creates richer demo data:
+- Users: `dev@promptworkflow.local`, `editor@promptworkflow.local`, `viewer@promptworkflow.local`
+- Projects: `Sample Support Project`, `Sample Ops Project`
+- Workflows:
+  - `Seeded Support Triage` (prompt + condition + branching outputs)
+  - `Seeded Tool + Memory + Validator` (tool + memory + validator path)
+  - `Seeded Ops Digest` (simple prompt-output flow)
+- Existing run history with terminal statuses (`completed`, `failed`, `timed_out`, `cancelled`)
+- Step-level run logs, tags, workflow versions, memory entries, and audit activity
+
+## Quick Verification Flow
+
+1. Start services:
+
+```bash
+docker compose up --build
+```
+
+2. Seed demo data:
+
+```bash
+docker compose exec backend python -m app.db.seed
+```
+
+3. Check core pages:
+- `http://localhost:5173/` -> projects list should show seeded projects
+- Open `Sample Support Project` -> verify workflows are listed with tags
+- Open `Seeded Tool + Memory + Validator` -> inspect graph, run once, then open run history/details
+- Open Dashboard (`/dashboard`) -> verify counts, status breakdown, most used tools, recent activity
+
+4. Check APIs quickly:
+
+```bash
+curl -s http://localhost:8000/api/health
+curl -s http://localhost:8000/api/projects
+curl -s http://localhost:8000/api/analytics/dashboard
+```
+
 ## Notes
 
 - Authentication is scaffolded only (local user header + default dev user bootstrap).

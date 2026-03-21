@@ -1,6 +1,6 @@
 """Add collaboration, workflow versioning, tags, and audit logs.
 
-Revision ID: 0006_collaboration_versioning_analytics
+Revision ID: 0006_collab_versioning
 Revises: 0005_background_runs_and_budgets
 Create Date: 2026-03-21 14:10:00
 """
@@ -12,7 +12,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = "0006_collaboration_versioning_analytics"
+revision: str = "0006_collab_versioning"
 down_revision: Union[str, None] = "0005_background_runs_and_budgets"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
