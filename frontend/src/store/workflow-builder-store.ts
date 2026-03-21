@@ -20,7 +20,28 @@ import {
   type WorkflowReactNodeData,
   type WorkflowRecord,
   type WorkflowSavePayload,
+  type WorkflowTemplateDefinition,
 } from "@/types/workflow";
+
+type WorkflowTemplateInsertOptions = {
+  replaceExisting?: boolean;
+  anchor?: {
+    x: number;
+    y: number;
+  };
+};
+
+type AddNodeOptions = {
+  position?: {
+    x: number;
+    y: number;
+  };
+  label?: string;
+  config?: WorkflowNodeConfig;
+  select?: boolean;
+};
+
+type LayoutDirection = "LR" | "TB";
 
 export type WorkflowBuilderState = {
   workflowId: string | null;
@@ -39,7 +60,11 @@ export type WorkflowBuilderState = {
   setWorkflowName: (name: string) => void;
   setWorkflowDescription: (description: string) => void;
   setWorkflowTags: (tags: string[]) => void;
-  addNode: (nodeType: NodeType) => void;
+  addNode: (nodeType: NodeType, options?: AddNodeOptions) => void;
+  deleteSelectedNode: () => void;
+  duplicateSelectedNode: () => void;
+  autoLayout: (direction?: LayoutDirection) => void;
+  insertTemplate: (template: WorkflowTemplateDefinition, options?: WorkflowTemplateInsertOptions) => void;
   updateNode: (nodeId: string, patch: Partial<Pick<WorkflowNodeEntity, "label" | "config">>) => void;
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
@@ -59,6 +84,22 @@ const NODE_LABELS: Record<NodeType, string> = {
   memory_write: "Memory Write Node",
   validator: "Validator Node",
 };
+
+const GRID_SIZE = 24;
+const NODE_X_SPACING = 320;
+const NODE_Y_SPACING = 170;
+
+function snap(value: number): number {
+  return Math.round(value / GRID_SIZE) * GRID_SIZE;
+}
+
+function cloneConfig(config: WorkflowNodeConfig): WorkflowNodeConfig {
+  try {
+    return structuredClone(config);
+  } catch {
+    return JSON.parse(JSON.stringify(config)) as WorkflowNodeConfig;
+  }
+}
 
 function defaultConfig(nodeType: NodeType): WorkflowNodeConfig {
   if (nodeType === "prompt") {
@@ -279,29 +320,253 @@ export const useWorkflowBuilderStore = create<WorkflowBuilderState>((set, get) =
     set({ tags: normalized, isDirty: true });
   },
 
-  addNode: (nodeType) => {
+  addNode: (nodeType, options) => {
     const state = get();
     const id = crypto.randomUUID();
     const index = state.nodeOrder.length;
 
+    const defaultPosition = {
+      x: snap(120 + (index % 3) * 220),
+      y: snap(120 + Math.floor(index / 3) * 140),
+    };
+
     const newNode: WorkflowNodeEntity = {
       id,
       nodeType,
-      label: NODE_LABELS[nodeType],
+      label: options?.label ?? NODE_LABELS[nodeType],
       position: {
-        x: 120 + (index % 3) * 220,
-        y: 120 + Math.floor(index / 3) * 140,
+        x: snap(options?.position?.x ?? defaultPosition.x),
+        y: snap(options?.position?.y ?? defaultPosition.y),
       },
-      config: defaultConfig(nodeType),
+      config: options?.config ? cloneConfig(options.config) : defaultConfig(nodeType),
     };
 
+    const shouldSelect = options?.select ?? true;
     set({
       nodesById: {
         ...state.nodesById,
         [id]: newNode,
       },
       nodeOrder: [...state.nodeOrder, id],
-      selectedNodeId: id,
+      selectedNodeId: shouldSelect ? id : state.selectedNodeId,
+      isDirty: true,
+    });
+  },
+
+  deleteSelectedNode: () => {
+    const state = get();
+    const selectedNodeId = state.selectedNodeId;
+    if (!selectedNodeId) {
+      return;
+    }
+    if (!state.nodesById[selectedNodeId]) {
+      return;
+    }
+
+    const { [selectedNodeId]: _, ...nextNodesById } = state.nodesById;
+    const nextNodeOrder = state.nodeOrder.filter((nodeId) => nodeId !== selectedNodeId);
+
+    const nextEdges = state.edgeOrder
+      .map((edgeId) => state.edgesById[edgeId])
+      .filter((edge) => edge.source !== selectedNodeId && edge.target !== selectedNodeId);
+    const normalizedEdges = normalizeEdges(nextEdges);
+
+    set({
+      nodesById: nextNodesById,
+      nodeOrder: nextNodeOrder,
+      edgesById: normalizedEdges.edgesById,
+      edgeOrder: normalizedEdges.edgeOrder,
+      selectedNodeId: null,
+      isDirty: true,
+    });
+  },
+
+  duplicateSelectedNode: () => {
+    const state = get();
+    const selectedNodeId = state.selectedNodeId;
+    if (!selectedNodeId) {
+      return;
+    }
+    const sourceNode = state.nodesById[selectedNodeId];
+    if (!sourceNode) {
+      return;
+    }
+
+    get().addNode(sourceNode.nodeType, {
+      label: `${sourceNode.label} Copy`,
+      config: cloneConfig(sourceNode.config),
+      position: {
+        x: snap(sourceNode.position.x + 72),
+        y: snap(sourceNode.position.y + 72),
+      },
+      select: true,
+    });
+  },
+
+  autoLayout: (direction = "LR") => {
+    const state = get();
+    const nodeIds = [...state.nodeOrder];
+    if (nodeIds.length === 0) {
+      return;
+    }
+
+    const nodesById = state.nodesById;
+    const outgoing = new Map<string, string[]>();
+    const incomingCount = new Map<string, number>();
+    for (const nodeId of nodeIds) {
+      outgoing.set(nodeId, []);
+      incomingCount.set(nodeId, 0);
+    }
+
+    for (const edgeId of state.edgeOrder) {
+      const edge = state.edgesById[edgeId];
+      if (!edge) {
+        continue;
+      }
+      if (!nodesById[edge.source] || !nodesById[edge.target]) {
+        continue;
+      }
+      outgoing.get(edge.source)?.push(edge.target);
+      incomingCount.set(edge.target, (incomingCount.get(edge.target) ?? 0) + 1);
+    }
+
+    const queue = nodeIds.filter((nodeId) => (incomingCount.get(nodeId) ?? 0) === 0);
+    const levels = new Map<string, number>();
+    for (const nodeId of queue) {
+      levels.set(nodeId, 0);
+    }
+
+    let cursor = 0;
+    while (cursor < queue.length) {
+      const nodeId = queue[cursor];
+      cursor += 1;
+      const level = levels.get(nodeId) ?? 0;
+      for (const targetId of outgoing.get(nodeId) ?? []) {
+        const previousLevel = levels.get(targetId) ?? 0;
+        levels.set(targetId, Math.max(previousLevel, level + 1));
+        incomingCount.set(targetId, (incomingCount.get(targetId) ?? 0) - 1);
+        if ((incomingCount.get(targetId) ?? 0) === 0) {
+          queue.push(targetId);
+        }
+      }
+    }
+
+    if (queue.length < nodeIds.length) {
+      for (const [index, nodeId] of nodeIds.entries()) {
+        levels.set(nodeId, levels.get(nodeId) ?? index);
+      }
+    }
+
+    const groups = new Map<number, string[]>();
+    for (const nodeId of nodeIds) {
+      const level = levels.get(nodeId) ?? 0;
+      const bucket = groups.get(level) ?? [];
+      bucket.push(nodeId);
+      groups.set(level, bucket);
+    }
+
+    const sortedLevels = [...groups.keys()].sort((a, b) => a - b);
+    const nextNodesById = { ...nodesById };
+
+    for (const level of sortedLevels) {
+      const bucket = groups.get(level) ?? [];
+      bucket.sort((a, b) => {
+        const left = nodesById[a];
+        const right = nodesById[b];
+        return left.position.y - right.position.y || left.position.x - right.position.x;
+      });
+
+      bucket.forEach((nodeId, index) => {
+        const x = direction === "LR" ? snap(120 + level * NODE_X_SPACING) : snap(120 + index * 260);
+        const y = direction === "LR" ? snap(120 + index * NODE_Y_SPACING) : snap(120 + level * NODE_Y_SPACING);
+        nextNodesById[nodeId] = {
+          ...nextNodesById[nodeId],
+          position: { x, y },
+        };
+      });
+    }
+
+    set({
+      nodesById: nextNodesById,
+      isDirty: true,
+    });
+  },
+
+  insertTemplate: (template, options) => {
+    const state = get();
+    if (template.nodes.length === 0) {
+      return;
+    }
+    const replaceExisting = options?.replaceExisting ?? false;
+
+    const baseNodeOrder = replaceExisting ? [] : [...state.nodeOrder];
+    const baseNodesById = replaceExisting ? ({} as Record<string, WorkflowNodeEntity>) : { ...state.nodesById };
+    const baseEdgeOrder = replaceExisting ? [] : [...state.edgeOrder];
+    const baseEdgesById = replaceExisting ? ({} as Record<string, WorkflowEdgeEntity>) : { ...state.edgesById };
+
+    const offset =
+      options?.anchor ??
+      (() => {
+        if (replaceExisting || baseNodeOrder.length === 0) {
+          return { x: 120, y: 120 };
+        }
+        const rightMostX = Math.max(...baseNodeOrder.map((nodeId) => baseNodesById[nodeId].position.x));
+        const topY = Math.min(...baseNodeOrder.map((nodeId) => baseNodesById[nodeId].position.y));
+        return { x: snap(rightMostX + NODE_X_SPACING), y: snap(topY) };
+      })();
+
+    const minTemplateX = Math.min(...template.nodes.map((node) => node.position.x));
+    const minTemplateY = Math.min(...template.nodes.map((node) => node.position.y));
+
+    const idMap = new Map<string, string>();
+    const insertedNodeIds: string[] = [];
+    for (const templateNode of template.nodes) {
+      const nextId = crypto.randomUUID();
+      idMap.set(templateNode.id, nextId);
+      insertedNodeIds.push(nextId);
+      baseNodesById[nextId] = {
+        id: nextId,
+        nodeType: templateNode.nodeType,
+        label: templateNode.label,
+        position: {
+          x: snap(offset.x + templateNode.position.x - minTemplateX),
+          y: snap(offset.y + templateNode.position.y - minTemplateY),
+        },
+        config: cloneConfig(templateNode.config),
+      };
+      baseNodeOrder.push(nextId);
+    }
+
+    for (const templateEdge of template.edges) {
+      const source = idMap.get(templateEdge.source);
+      const target = idMap.get(templateEdge.target);
+      if (!source || !target) {
+        continue;
+      }
+      const edgeId = crypto.randomUUID();
+      baseEdgesById[edgeId] = {
+        id: edgeId,
+        source,
+        target,
+        sourceHandle: templateEdge.sourceHandle ?? null,
+        targetHandle: templateEdge.targetHandle ?? null,
+        label: templateEdge.label ?? null,
+        data: templateEdge.data ?? null,
+      };
+      baseEdgeOrder.push(edgeId);
+    }
+
+    const nextTags = replaceExisting
+      ? (template.tags ?? [])
+      : [...new Set([...state.tags, ...(template.tags ?? [])])];
+
+    set({
+      nodesById: baseNodesById,
+      nodeOrder: baseNodeOrder,
+      edgesById: baseEdgesById,
+      edgeOrder: baseEdgeOrder,
+      selectedNodeId: insertedNodeIds[0] ?? state.selectedNodeId,
+      tags: nextTags,
       isDirty: true,
     });
   },

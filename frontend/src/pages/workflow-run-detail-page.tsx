@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,7 @@ import {
   useRetryWorkflowRunMutation,
   useRetryWorkflowRunStepMutation,
   useWorkflowRunQuery,
+  useWorkflowRunsQuery,
 } from "@/hooks/queries";
 import { cn } from "@/lib/utils";
 
@@ -87,8 +89,11 @@ function formatBudget(used: number, budget: number | null): string {
 export function WorkflowRunDetailPage() {
   const navigate = useNavigate();
   const { projectId, workflowId, runId } = useParams<{ projectId: string; workflowId: string; runId: string }>();
+  const [compareRunId, setCompareRunId] = useState<string>("");
 
   const runQuery = useWorkflowRunQuery(runId);
+  const runsQuery = useWorkflowRunsQuery(workflowId);
+  const compareRunQuery = useWorkflowRunQuery(compareRunId || undefined);
   const retryMutation = useRetryWorkflowRunStepMutation(runId, workflowId);
   const cancelRunMutation = useCancelWorkflowRunMutation(runId, workflowId);
   const retryRunMutation = useRetryWorkflowRunMutation(runId, workflowId);
@@ -132,6 +137,26 @@ export function WorkflowRunDetailPage() {
 
   const canCancel = run.status === "queued" || run.status === "running";
   const canRetryRun = run.status === "failed" || run.status === "timed_out" || run.status === "cancelled";
+  const compareCandidates = (runsQuery.data ?? []).filter((candidate) => candidate.id !== run.id);
+  const comparedRun = compareRunQuery.data;
+
+  const stepDiffRows = useMemo(() => {
+    if (!comparedRun) {
+      return [];
+    }
+    const currentMap = new Map(run.steps.map((step) => [step.step_index, step]));
+    const compareMap = new Map(comparedRun.steps.map((step) => [step.step_index, step]));
+    const indexes = [...new Set([...currentMap.keys(), ...compareMap.keys()])].sort((a, b) => a - b);
+    return indexes.map((index) => ({
+      index,
+      current: currentMap.get(index),
+      compared: compareMap.get(index),
+    }));
+  }, [comparedRun, run.steps]);
+
+  const hasFinalOutputDiff =
+    comparedRun !== undefined &&
+    JSON.stringify(run.result_payload ?? null) !== JSON.stringify(comparedRun.result_payload ?? null);
 
   return (
     <div className="space-y-4">
@@ -288,6 +313,94 @@ export function WorkflowRunDetailPage() {
               </div>
             );
           })}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Run Comparison</CardTitle>
+          <CardDescription>Compare this run against another run of the same workflow.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="max-w-sm">
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Compare Against</label>
+            <select
+              className="h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900"
+              value={compareRunId}
+              onChange={(event) => setCompareRunId(event.target.value)}
+            >
+              <option value="">Select run</option>
+              {compareCandidates.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.id.slice(0, 8)} • {candidate.status} • {formatDate(candidate.created_at)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {compareRunQuery.isFetching && compareRunId && <p className="text-sm text-slate-500">Loading comparison run...</p>}
+          {compareRunQuery.error && <p className="text-sm text-rose-600">{(compareRunQuery.error as Error).message}</p>}
+
+          {comparedRun && (
+            <div className="space-y-3">
+              <div className="grid gap-2 rounded-md bg-slate-50 p-3 text-sm dark:bg-slate-900/60 md:grid-cols-3">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Current Status</p>
+                  <p className="font-semibold text-slate-900 dark:text-slate-100">{run.status}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Compared Status</p>
+                  <p className="font-semibold text-slate-900 dark:text-slate-100">{comparedRun.status}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Final Output Diff</p>
+                  <p className={cn("font-semibold", hasFinalOutputDiff ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400")}>
+                    {hasFinalOutputDiff ? "Changed" : "No Change"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div>
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Current Final Output</p>
+                  <pre className="max-h-56 overflow-auto rounded-md bg-slate-900 p-3 text-xs text-slate-100">
+                    {pretty(run.result_payload)}
+                  </pre>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Compared Final Output</p>
+                  <pre className="max-h-56 overflow-auto rounded-md bg-slate-900 p-3 text-xs text-slate-100">
+                    {pretty(comparedRun.result_payload)}
+                  </pre>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-700">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-600 dark:bg-slate-900/80 dark:text-slate-300">
+                    <tr>
+                      <th className="px-3 py-2">Step</th>
+                      <th className="px-3 py-2">Current</th>
+                      <th className="px-3 py-2">Compared</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stepDiffRows.map((row) => (
+                      <tr key={row.index} className="border-t border-slate-200 dark:border-slate-700">
+                        <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-200">#{row.index}</td>
+                        <td className="px-3 py-2 text-slate-600 dark:text-slate-300">
+                          {row.current ? `${row.current.node_label} • ${row.current.status}` : "-"}
+                        </td>
+                        <td className="px-3 py-2 text-slate-600 dark:text-slate-300">
+                          {row.compared ? `${row.compared.node_label} • ${row.compared.status}` : "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

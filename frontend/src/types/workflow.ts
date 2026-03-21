@@ -107,6 +107,36 @@ export interface WorkflowReactNodeData {
   config: WorkflowNodeConfig;
 }
 
+export interface WorkflowTemplateNode {
+  id: string;
+  nodeType: NodeType;
+  label: string;
+  position: {
+    x: number;
+    y: number;
+  };
+  config: WorkflowNodeConfig;
+}
+
+export interface WorkflowTemplateEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+  label?: string | null;
+  data?: Record<string, unknown> | null;
+}
+
+export interface WorkflowTemplateDefinition {
+  id: string;
+  title: string;
+  description: string;
+  tags?: string[];
+  nodes: WorkflowTemplateNode[];
+  edges: WorkflowTemplateEdge[];
+}
+
 export type WorkflowRunStatus =
   | "queued"
   | "running"

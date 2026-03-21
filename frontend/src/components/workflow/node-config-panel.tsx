@@ -155,7 +155,7 @@ export function NodeConfigPanel({ readOnly = false }: NodeConfigPanelProps) {
             <div className="space-y-1.5">
               <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Tool</label>
               <select
-                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm ring-offset-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm ring-offset-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                 value={(selectedNode.config.toolName as string | undefined) ?? ""}
                 onChange={(event) => {
                   const nextToolName = event.target.value;
@@ -219,7 +219,7 @@ export function NodeConfigPanel({ readOnly = false }: NodeConfigPanelProps) {
             <div className="space-y-1.5">
               <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Memory Scope</label>
               <select
-                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm ring-offset-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm ring-offset-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                 value={(selectedNode.config.memoryScope as MemoryScope | undefined) ?? "workflow"}
                 onChange={(event) =>
                   updateNode(selectedNode.id, {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { NodeConfigPanel } from "@/components/workflow/node-config-panel";
@@ -6,6 +6,7 @@ import { NodePalette } from "@/components/workflow/node-palette";
 import { WorkflowCanvas } from "@/components/workflow/workflow-canvas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { WORKFLOW_TEMPLATES } from "@/lib/workflow-templates";
 import {
   useExecuteWorkflowMutation,
   useProjectAccessQuery,
@@ -40,6 +41,11 @@ export function WorkflowBuilderPage() {
   const setWorkflowTags = useWorkflowBuilderStore((state) => state.setWorkflowTags);
   const toSavePayload = useWorkflowBuilderStore((state) => state.toSavePayload);
   const isDirty = useWorkflowBuilderStore((state) => state.isDirty);
+  const hasNodes = useWorkflowBuilderStore((state) => state.nodeOrder.length > 0);
+  const autoLayout = useWorkflowBuilderStore((state) => state.autoLayout);
+  const deleteSelectedNode = useWorkflowBuilderStore((state) => state.deleteSelectedNode);
+  const duplicateSelectedNode = useWorkflowBuilderStore((state) => state.duplicateSelectedNode);
+  const insertTemplate = useWorkflowBuilderStore((state) => state.insertTemplate);
 
   const access = projectAccessQuery.data;
   const canEdit = Boolean(access?.can_edit);
@@ -58,7 +64,7 @@ export function WorkflowBuilderPage() {
     return () => clear();
   }, [clear]);
 
-  const onSave = async () => {
+  const onSave = useCallback(async () => {
     if (!canEdit) {
       return;
     }
@@ -67,9 +73,9 @@ export function WorkflowBuilderPage() {
       return;
     }
     await saveWorkflowMutation.mutateAsync(payload);
-  };
+  }, [canEdit, saveWorkflowMutation, toSavePayload, workflowId]);
 
-  const onRun = async () => {
+  const onRun = useCallback(async () => {
     if (!workflowId || !projectId) {
       return;
     }
@@ -87,7 +93,74 @@ export function WorkflowBuilderPage() {
 
     const run = await executeWorkflowMutation.mutateAsync({});
     void navigate(`/projects/${projectId}/workflows/${workflowId}/runs/${run.id}`);
-  };
+  }, [
+    canRun,
+    executeWorkflowMutation,
+    isDirty,
+    navigate,
+    projectId,
+    saveWorkflowMutation,
+    toSavePayload,
+    workflowId,
+  ]);
+
+  useEffect(() => {
+    const isTypingTarget = (event: KeyboardEvent): boolean => {
+      const target = event.target as HTMLElement | null;
+      if (!target) {
+        return false;
+      }
+      const tag = target.tagName.toLowerCase();
+      return tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable;
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isTypingTarget(event)) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      const mod = event.metaKey || event.ctrlKey;
+
+      if (mod && key === "s") {
+        event.preventDefault();
+        void onSave();
+        return;
+      }
+
+      if (mod && key === "enter") {
+        event.preventDefault();
+        void onRun();
+        return;
+      }
+
+      if (key === "a" && canEdit) {
+        event.preventDefault();
+        autoLayout("LR");
+        return;
+      }
+
+      if (key === "d" && canEdit) {
+        event.preventDefault();
+        duplicateSelectedNode();
+        return;
+      }
+
+      if ((key === "delete" || key === "backspace") && canEdit) {
+        event.preventDefault();
+        deleteSelectedNode();
+        return;
+      }
+
+      if (event.shiftKey && key === "t" && canEdit) {
+        event.preventDefault();
+        insertTemplate(WORKFLOW_TEMPLATES[0], { replaceExisting: !hasNodes });
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [autoLayout, canEdit, deleteSelectedNode, duplicateSelectedNode, hasNodes, insertTemplate, onRun, onSave]);
 
   const onPublishVersion = async () => {
     if (!canEdit || !workflowId) {
@@ -182,6 +255,12 @@ export function WorkflowBuilderPage() {
             {executeWorkflowMutation.isPending ? "Queueing..." : "Run Workflow"}
           </Button>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">
+        Shortcuts: <span className="font-semibold">Ctrl/Cmd+S</span> save, <span className="font-semibold">Ctrl/Cmd+Enter</span> run,{" "}
+        <span className="font-semibold">A</span> auto-layout, <span className="font-semibold">D</span> duplicate node,{" "}
+        <span className="font-semibold">Del</span> delete node, <span className="font-semibold">Shift+T</span> starter template.
       </div>
 
       {(saveWorkflowMutation.error || executeWorkflowMutation.error) && (
