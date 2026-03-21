@@ -16,6 +16,17 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    container_name: pws-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build:
       context: ./backend
@@ -29,12 +40,44 @@ services:
       DEFAULT_USER_NAME: Dev User
       ENABLE_MCP_TOOLS: "true"
       MCP_MOUNT_PATH: /mcp
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      CELERY_DEFAULT_QUEUE: workflow_runs
+      WORKFLOW_DEFAULT_TIMEOUT_SECONDS: 300
+      WORKFLOW_DEFAULT_TOKEN_BUDGET: 8000
+      WORKFLOW_DEFAULT_CONTEXT_BUDGET: 32000
     volumes:
       - ./backend:/app
     ports:
       - "8000:8000"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-worker:
+    build:
+      context: ./backend
+    container_name: pws-celery-worker
+    working_dir: /app
+    command: sh -c "alembic upgrade head && celery -A app.core.celery_app:celery_app worker --loglevel=info -Q workflow_runs --concurrency=1"
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/prompt_workflow_studio
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      CELERY_DEFAULT_QUEUE: workflow_runs
+      WORKFLOW_DEFAULT_TIMEOUT_SECONDS: 300
+      WORKFLOW_DEFAULT_TOKEN_BUDGET: 8000
+      WORKFLOW_DEFAULT_CONTEXT_BUDGET: 32000
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   frontend:

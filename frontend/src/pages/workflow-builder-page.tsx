@@ -108,7 +108,7 @@ export function WorkflowBuilderPage() {
             onClick={onRun}
             disabled={saveWorkflowMutation.isPending || executeWorkflowMutation.isPending}
           >
-            {executeWorkflowMutation.isPending ? "Running..." : "Run Workflow"}
+            {executeWorkflowMutation.isPending ? "Queueing..." : "Run Workflow"}
           </Button>
         </div>
       </div>

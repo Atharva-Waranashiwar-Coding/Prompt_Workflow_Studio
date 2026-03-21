@@ -5,8 +5,9 @@ Phase 1 foundation for a visual prompt workflow orchestration platform.
 ## Stack
 
 - Frontend: React + TypeScript + Vite + React Flow + Zustand + TanStack Query + Tailwind + shadcn-style UI components
-- Backend: FastAPI + Pydantic + SQLAlchemy + Alembic
+- Backend: FastAPI + Pydantic + SQLAlchemy + Alembic + Celery
 - Database: PostgreSQL
+- Queue/Broker: Redis
 - Dev environment: Docker Compose
 
 ## Project Structure
@@ -121,6 +122,17 @@ docker compose up --build
 - Persisted Tool node execution input/output/error in run steps
 - MCP mount path is configurable via `MCP_MOUNT_PATH` (default: `/mcp`)
 
+## Phase 5 Background Execution + Budgets
+
+- Added Redis + Celery worker for background workflow execution
+- `POST /api/workflows/{workflow_id}/runs` now enqueues runs and returns immediately
+- Run lifecycle now supports: `queued`, `running`, `completed`, `failed`, `cancelled`, `timed_out`
+- Added cancellation endpoint for active runs
+- Added run retry and failed-step retry enqueue flows
+- Added run/step retry metadata (`retry_count`, `retry_reason`)
+- Added timeout and simulated budget tracking (`token_budget`, `token_used`, `context_budget`, `context_used`)
+- Frontend run views now poll active runs and expose cancel/retry actions
+
 ## API Endpoints
 
 - `GET /api/health`
@@ -134,6 +146,9 @@ docker compose up --build
 - `GET /api/workflows/{workflow_id}/runs`
 - `POST /api/workflows/{workflow_id}/runs`
 - `GET /api/workflow-runs/{run_id}`
+- `POST /api/workflow-runs/{run_id}/cancel`
+- `POST /api/workflow-runs/{run_id}/retry`
+- `POST /api/workflow-runs/{run_id}/steps/{step_id}/retry`
 - `GET /api/tools`
 - `POST /api/tools/template_fetch`
 - `POST /api/tools/memory_read`

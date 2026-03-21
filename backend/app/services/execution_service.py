@@ -1,5 +1,6 @@
 import ast
 import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -9,6 +10,9 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.celery_app import celery_app
+from app.core.config import get_settings
+from app.db.session import SessionLocal
 from app.models.project import Project
 from app.models.run import WorkflowRun, WorkflowRunStep
 from app.models.workflow import Workflow, WorkflowEdge, WorkflowNode
@@ -17,19 +21,46 @@ from app.services.tool_service import invoke_tool_by_name
 from app.services.validator_service import validate_payload
 from app.tools.registry import get_tool_definition
 
+try:
+    from billiard.exceptions import SoftTimeLimitExceeded
+except Exception:  # pragma: no cover
+    class SoftTimeLimitExceeded(Exception):
+        pass
+
+
 RUN_STATUS_QUEUED = "queued"
 RUN_STATUS_RUNNING = "running"
 RUN_STATUS_COMPLETED = "completed"
 RUN_STATUS_FAILED = "failed"
+RUN_STATUS_CANCELLED = "cancelled"
+RUN_STATUS_TIMED_OUT = "timed_out"
+
+RUN_ACTIVE_STATUSES = {RUN_STATUS_QUEUED, RUN_STATUS_RUNNING}
+RUN_TERMINAL_STATUSES = {RUN_STATUS_COMPLETED, RUN_STATUS_FAILED, RUN_STATUS_CANCELLED, RUN_STATUS_TIMED_OUT}
 
 STEP_STATUS_RUNNING = "running"
 STEP_STATUS_COMPLETED = "completed"
 STEP_STATUS_FAILED = "failed"
+STEP_STATUS_CANCELLED = "cancelled"
+STEP_STATUS_TIMED_OUT = "timed_out"
 
 CONDITION_TRUE_HANDLE = "true"
 CONDITION_FALSE_HANDLE = "false"
 
 SUPPORTED_NODE_TYPES = {"prompt", "condition", "output", "tool", "memory_read", "memory_write", "validator"}
+PROCESS_RUN_TASK_NAME = "app.tasks.execution.process_workflow_run"
+
+
+class RunCancelledError(Exception):
+    pass
+
+
+class RunTimedOutError(Exception):
+    pass
+
+
+class BudgetExceededError(Exception):
+    pass
 
 
 @dataclass
@@ -53,6 +84,17 @@ def _stringify(value: object) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value, default=str)
+
+
+def _estimate_token_usage(*values: object) -> int:
+    total_chars = sum(len(_stringify(value)) for value in values)
+    if total_chars <= 0:
+        return 0
+    return int(math.ceil(total_chars / 4))
+
+
+def _estimate_context_usage(*values: object) -> int:
+    return sum(len(_stringify(value)) for value in values)
 
 
 def _extract_condition_operand(value: object) -> object:
@@ -155,6 +197,17 @@ def _require_memory_key(raw_value: Any, context: dict[str, Any]) -> str:
     return memory_key
 
 
+def _coerce_uuid(value: Any) -> UUID | None:
+    if value is None:
+        return None
+    if isinstance(value, UUID):
+        return value
+    try:
+        return UUID(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def validate_workflow_for_execution(workflow: Workflow) -> ExecutionGraph:
     if not workflow.nodes:
         raise ValueError("Workflow has no nodes.")
@@ -177,7 +230,6 @@ def validate_workflow_for_execution(workflow: Workflow) -> ExecutionGraph:
         raise ValueError("Workflow must contain exactly one start node (a node with no incoming edge).")
 
     start_node_id = start_nodes[0]
-
     reachable: set[UUID] = set()
 
     def mark_reachable(node_id: UUID) -> None:
@@ -534,196 +586,300 @@ def _build_retry_state(steps: list[WorkflowRunStep], retry_step_index: int) -> t
     return last_output, step_outputs
 
 
-def _run_execution(
+def _resolve_run_limits(
+    *,
+    token_budget: int | None,
+    context_budget: int | None,
+    timeout_seconds: int | None,
+) -> tuple[int | None, int | None, int | None]:
+    settings = get_settings()
+    resolved_token_budget = token_budget if token_budget is not None else settings.workflow_default_token_budget
+    resolved_context_budget = context_budget if context_budget is not None else settings.workflow_default_context_budget
+    resolved_timeout_seconds = timeout_seconds if timeout_seconds is not None else settings.workflow_default_timeout_seconds
+    return resolved_token_budget, resolved_context_budget, resolved_timeout_seconds
+
+
+def _create_queued_run(
     db: Session,
+    *,
     workflow: Workflow,
     user_id: UUID,
-    *,
-    run_input: dict[str, Any] | None = None,
-    start_node_id: UUID | None = None,
-    initial_last_output: object = None,
-    initial_step_outputs: dict[str, Any] | None = None,
-    retry_context: dict[str, Any] | None = None,
+    input_payload: dict[str, Any],
+    execution_options: dict[str, Any] | None = None,
+    retry_count: int = 0,
+    retry_reason: str | None = None,
+    token_budget: int | None = None,
+    context_budget: int | None = None,
+    timeout_seconds: int | None = None,
 ) -> WorkflowRun:
-    safe_run_input = run_input or {}
+    resolved_token_budget, resolved_context_budget, resolved_timeout_seconds = _resolve_run_limits(
+        token_budget=token_budget,
+        context_budget=context_budget,
+        timeout_seconds=timeout_seconds,
+    )
+    settings = get_settings()
 
     run = WorkflowRun(
         workflow_id=workflow.id,
         triggered_by_user_id=user_id,
         status=RUN_STATUS_QUEUED,
+        input_payload=_to_json(input_payload),
+        execution_options=_to_json(execution_options or {}),
+        queue_name=settings.celery_default_queue,
+        timeout_seconds=resolved_timeout_seconds,
+        retry_count=retry_count,
+        retry_reason=retry_reason,
+        token_budget=resolved_token_budget,
+        token_used=0,
+        context_budget=resolved_context_budget,
+        context_used=0,
     )
     db.add(run)
     db.flush()
+    return run
 
-    run.status = RUN_STATUS_RUNNING
-    run.started_at = _utcnow()
 
+def _enqueue_run_task(run: WorkflowRun) -> str:
+    queue_name = run.queue_name or get_settings().celery_default_queue
+    kwargs: dict[str, Any] = {"queue": queue_name}
+    if run.timeout_seconds:
+        kwargs["soft_time_limit"] = max(run.timeout_seconds, 1)
+        kwargs["time_limit"] = max(run.timeout_seconds + 10, 5)
+
+    result = celery_app.send_task(PROCESS_RUN_TASK_NAME, args=[str(run.id)], **kwargs)
+    return str(result.id)
+
+
+def _read_live_run_state(db: Session, run_id: UUID) -> tuple[str, datetime | None]:
+    row = db.execute(
+        select(WorkflowRun.status, WorkflowRun.cancel_requested_at).where(WorkflowRun.id == run_id)
+    ).first()
+    if row is None:
+        return RUN_STATUS_CANCELLED, _utcnow()
+    return str(row[0]), row[1]
+
+
+def _assert_run_not_cancelled(db: Session, run: WorkflowRun) -> None:
+    status, cancel_requested_at = _read_live_run_state(db, run.id)
+    if status == RUN_STATUS_CANCELLED or cancel_requested_at is not None:
+        raise RunCancelledError("Run was cancelled by user request.")
+
+
+def _assert_run_not_timed_out(run: WorkflowRun) -> None:
+    if run.timeout_seconds is None or run.started_at is None:
+        return
+    elapsed_seconds = (_utcnow() - run.started_at).total_seconds()
+    if elapsed_seconds > run.timeout_seconds:
+        raise RunTimedOutError(f"Run exceeded timeout of {run.timeout_seconds} seconds.")
+
+
+def _apply_step_budget_usage(run: WorkflowRun, step: WorkflowRunStep) -> None:
+    step.token_used = _estimate_token_usage(step.input_payload, step.output_payload)
+    step.context_used = _estimate_context_usage(step.input_payload, step.output_payload)
+
+    run.token_used = int((run.token_used or 0) + step.token_used)
+    run.context_used = int((run.context_used or 0) + step.context_used)
+
+    if run.token_budget is not None and run.token_used > run.token_budget:
+        raise BudgetExceededError(
+            f"Token budget exceeded ({run.token_used}/{run.token_budget})."
+        )
+    if run.context_budget is not None and run.context_used > run.context_budget:
+        raise BudgetExceededError(
+            f"Context budget exceeded ({run.context_used}/{run.context_budget})."
+        )
+
+
+def _mark_run_terminal(run: WorkflowRun, status: str, error_message: str | None = None) -> None:
+    run.status = status
+    run.error_message = error_message
+    if run.completed_at is None:
+        run.completed_at = _utcnow()
+
+
+def _execute_run(
+    db: Session,
+    *,
+    run: WorkflowRun,
+    workflow: Workflow,
+) -> None:
+    graph = validate_workflow_for_execution(workflow)
+
+    options = run.execution_options or {}
+    start_node_id = _coerce_uuid(options.get("start_node_id")) or graph.start_node_id
+    initial_last_output = options.get("initial_last_output")
+    initial_step_outputs = options.get("initial_step_outputs") or {}
+    retry_context = options.get("retry_context")
+
+    if start_node_id not in graph.nodes_by_id:
+        raise ValueError("Retry start node is not part of workflow graph.")
+
+    run_input = _to_json(run.input_payload or {})
     state: dict[str, Any] = {
-        "run_input": _to_json(safe_run_input),
+        "run_input": run_input,
         "last_output": _to_json(initial_last_output),
-        "step_outputs": _to_json(initial_step_outputs or {}),
+        "step_outputs": _to_json(initial_step_outputs),
     }
 
     final_result: Any = None
+    current_node_id: UUID | None = start_node_id
+    step_index = 1
+    safety_limit = max(len(graph.nodes_by_id) * 3, 5)
 
-    try:
-        graph = validate_workflow_for_execution(workflow)
-        current_node_id: UUID | None = start_node_id or graph.start_node_id
-        if current_node_id not in graph.nodes_by_id:
-            raise ValueError("Selected retry step does not belong to the workflow graph.")
+    while current_node_id is not None:
+        if step_index > safety_limit:
+            raise ValueError("Execution exceeded safety limit. Check graph for unexpected loops.")
 
-        step_index = 1
-        safety_limit = max(len(graph.nodes_by_id) * 3, 5)
+        _assert_run_not_cancelled(db, run)
+        _assert_run_not_timed_out(run)
 
-        while current_node_id is not None:
-            if step_index > safety_limit:
-                raise ValueError("Execution exceeded safety limit. Check graph for unexpected loops.")
+        node = graph.nodes_by_id[current_node_id]
+        step_input: dict[str, Any] = {
+            "run_input": state["run_input"],
+            "last_output": state["last_output"],
+            "step_outputs": state["step_outputs"],
+        }
+        if retry_context and step_index == 1:
+            step_input["retry_context"] = retry_context
 
-            node = graph.nodes_by_id[current_node_id]
-            step_input: dict[str, Any] = {
-                "run_input": state["run_input"],
-                "last_output": state["last_output"],
-                "step_outputs": state["step_outputs"],
-            }
-            if retry_context and step_index == 1:
-                step_input["retry_context"] = retry_context
+        step = WorkflowRunStep(
+            run_id=run.id,
+            step_index=step_index,
+            node_id=node.id,
+            node_type=node.node_type,
+            node_label=node.label,
+            status=STEP_STATUS_RUNNING,
+            input_payload=_to_json(step_input),
+            retry_count=run.retry_count,
+            retry_reason=run.retry_reason,
+            started_at=_utcnow(),
+        )
+        db.add(step)
+        db.flush()
 
-            step = WorkflowRunStep(
-                run_id=run.id,
-                step_index=step_index,
-                node_id=node.id,
-                node_type=node.node_type,
-                node_label=node.label,
-                status=STEP_STATUS_RUNNING,
-                input_payload=_to_json(step_input),
-                started_at=_utcnow(),
-            )
-            db.add(step)
-            db.flush()
+        try:
+            if node.node_type == "prompt":
+                node_output = _execute_prompt_node(node, run_input=run_input, last_output=state["last_output"])
+                next_node_id = _next_node_for_non_condition(graph, node.id)
 
-            try:
-                if node.node_type == "prompt":
-                    node_output = _execute_prompt_node(node, run_input=safe_run_input, last_output=state["last_output"])
-                    next_node_id = _next_node_for_non_condition(graph, node.id)
+            elif node.node_type == "condition":
+                node_output = _execute_condition_node(node, last_output=state["last_output"])
+                condition_result = bool(node_output["result"])
+                next_node_id = _next_node_for_condition(graph, node.id, condition_result)
 
-                elif node.node_type == "condition":
-                    node_output = _execute_condition_node(node, last_output=state["last_output"])
-                    condition_result = bool(node_output["result"])
-                    next_node_id = _next_node_for_condition(graph, node.id, condition_result)
+            elif node.node_type == "tool":
+                node_output, resolved_params = _execute_tool_node(
+                    db,
+                    node=node,
+                    run_input=run_input,
+                    last_output=state["last_output"],
+                    step_outputs=dict(state["step_outputs"]),
+                )
+                step.input_payload = _to_json(
+                    {
+                        **step_input,
+                        "tool_name": (node.config or {}).get("toolName"),
+                        "resolved_tool_params": resolved_params,
+                    }
+                )
+                next_node_id = _next_node_for_non_condition(graph, node.id)
 
-                elif node.node_type == "tool":
-                    step_outputs_for_context = dict(state["step_outputs"])
-                    node_output, resolved_params = _execute_tool_node(
-                        db,
-                        node=node,
-                        run_input=safe_run_input,
-                        last_output=state["last_output"],
-                        step_outputs=step_outputs_for_context,
-                    )
-                    step.input_payload = _to_json(
-                        {
-                            **step_input,
-                            "tool_name": (node.config or {}).get("toolName"),
-                            "resolved_tool_params": resolved_params,
-                        }
-                    )
-                    next_node_id = _next_node_for_non_condition(graph, node.id)
+            elif node.node_type == "memory_read":
+                node_output, memory_meta = _execute_memory_read_node(
+                    db,
+                    node=node,
+                    workflow=workflow,
+                    run=run,
+                    run_input=run_input,
+                    last_output=state["last_output"],
+                    step_outputs=dict(state["step_outputs"]),
+                )
+                step.input_payload = _to_json({**step_input, **memory_meta})
+                next_node_id = _next_node_for_non_condition(graph, node.id)
 
-                elif node.node_type == "memory_read":
-                    step_outputs_for_context = dict(state["step_outputs"])
-                    node_output, memory_meta = _execute_memory_read_node(
-                        db,
-                        node=node,
-                        workflow=workflow,
-                        run=run,
-                        run_input=safe_run_input,
-                        last_output=state["last_output"],
-                        step_outputs=step_outputs_for_context,
-                    )
-                    step.input_payload = _to_json({**step_input, **memory_meta})
-                    next_node_id = _next_node_for_non_condition(graph, node.id)
+            elif node.node_type == "memory_write":
+                node_output, memory_meta = _execute_memory_write_node(
+                    db,
+                    node=node,
+                    workflow=workflow,
+                    run=run,
+                    run_input=run_input,
+                    last_output=state["last_output"],
+                    step_outputs=dict(state["step_outputs"]),
+                )
+                step.input_payload = _to_json({**step_input, **memory_meta})
+                next_node_id = _next_node_for_non_condition(graph, node.id)
 
-                elif node.node_type == "memory_write":
-                    step_outputs_for_context = dict(state["step_outputs"])
-                    node_output, memory_meta = _execute_memory_write_node(
-                        db,
-                        node=node,
-                        workflow=workflow,
-                        run=run,
-                        run_input=safe_run_input,
-                        last_output=state["last_output"],
-                        step_outputs=step_outputs_for_context,
-                    )
-                    step.input_payload = _to_json({**step_input, **memory_meta})
-                    next_node_id = _next_node_for_non_condition(graph, node.id)
+            elif node.node_type == "validator":
+                node_output, validator_meta, validation_error = _execute_validator_node(
+                    node=node,
+                    run_input=run_input,
+                    last_output=state["last_output"],
+                    step_outputs=dict(state["step_outputs"]),
+                )
+                step.input_payload = _to_json({**step_input, **validator_meta})
+                step.output_payload = _to_json(node_output)
+                if validation_error:
+                    raise ValueError(validation_error)
+                next_node_id = _next_node_for_non_condition(graph, node.id)
 
-                elif node.node_type == "validator":
-                    step_outputs_for_context = dict(state["step_outputs"])
-                    node_output, validator_meta, validation_error = _execute_validator_node(
-                        node=node,
-                        run_input=safe_run_input,
-                        last_output=state["last_output"],
-                        step_outputs=step_outputs_for_context,
-                    )
-                    step.input_payload = _to_json({**step_input, **validator_meta})
-                    step.output_payload = _to_json(node_output)
-                    if validation_error:
-                        raise ValueError(validation_error)
-                    next_node_id = _next_node_for_non_condition(graph, node.id)
+            elif node.node_type == "output":
+                node_output = _execute_output_node(node, last_output=state["last_output"])
+                next_node_id = None
 
-                elif node.node_type == "output":
-                    node_output = _execute_output_node(node, last_output=state["last_output"])
-                    next_node_id = None
+            else:
+                raise ValueError(f"Unsupported node type '{node.node_type}'.")
 
-                else:
-                    raise ValueError(f"Unsupported node type '{node.node_type}'.")
+            if step.output_payload is None:
+                step.output_payload = _to_json(node_output)
 
-                if step.output_payload is None:
-                    step.output_payload = _to_json(node_output)
-                step.status = STEP_STATUS_COMPLETED
-                step.completed_at = _utcnow()
+            _assert_run_not_cancelled(db, run)
+            _assert_run_not_timed_out(run)
+            _apply_step_budget_usage(run, step)
 
-                step_output_json = _to_json(step.output_payload)
-                state["last_output"] = step_output_json
-                step_outputs = dict(state["step_outputs"])
-                step_outputs[str(node.id)] = step_output_json
-                state["step_outputs"] = step_outputs
+            step.status = STEP_STATUS_COMPLETED
+            step.completed_at = _utcnow()
 
-                if node.node_type == "output":
-                    final_result = step_output_json
-                    break
+            step_output_json = _to_json(step.output_payload)
+            state["last_output"] = step_output_json
+            step_outputs = dict(state["step_outputs"])
+            step_outputs[str(node.id)] = step_output_json
+            state["step_outputs"] = step_outputs
 
-                current_node_id = next_node_id
-                step_index += 1
-
-            except Exception as step_error:
-                if step.output_payload is None:
-                    step.output_payload = _to_json({"error": str(step_error)})
-                step.status = STEP_STATUS_FAILED
-                step.error_message = str(step_error)
-                step.completed_at = _utcnow()
-                run.status = RUN_STATUS_FAILED
-                run.error_message = f"Node '{node.label}' failed: {step_error}"
+            if node.node_type == "output":
+                final_result = step_output_json
                 break
 
-        if run.status != RUN_STATUS_FAILED:
-            if final_result is None:
-                raise ValueError("Execution finished without reaching an output node.")
-            run.status = RUN_STATUS_COMPLETED
-            run.result_payload = _to_json(final_result)
+            current_node_id = next_node_id
+            step_index += 1
 
-    except Exception as execution_error:
-        run.status = RUN_STATUS_FAILED
-        if not run.error_message:
-            run.error_message = str(execution_error)
+        except RunCancelledError as step_error:
+            step.status = STEP_STATUS_CANCELLED
+            step.error_message = str(step_error)
+            step.completed_at = _utcnow()
+            raise
+        except (RunTimedOutError, SoftTimeLimitExceeded) as step_error:
+            step.status = STEP_STATUS_TIMED_OUT
+            step.error_message = str(step_error)
+            step.completed_at = _utcnow()
+            raise RunTimedOutError(str(step_error)) from step_error
+        except Exception as step_error:
+            if step.output_payload is None:
+                step.output_payload = _to_json({"error": str(step_error)})
+            step.status = STEP_STATUS_FAILED
+            step.error_message = str(step_error)
+            step.completed_at = _utcnow()
+            _mark_run_terminal(run, RUN_STATUS_FAILED, f"Node '{node.label}' failed: {step_error}")
+            break
 
-    run.completed_at = _utcnow()
-    db.commit()
+    if run.status == RUN_STATUS_FAILED:
+        return
 
-    detailed_run = get_workflow_run_for_user(db, run.id, user_id, with_steps=True)
-    if detailed_run is None:
-        raise ValueError("Unable to load workflow run after execution.")
-    return detailed_run
+    if final_result is None:
+        raise ValueError("Execution finished without reaching an output node.")
+
+    run.result_payload = _to_json(final_result)
+    _mark_run_terminal(run, RUN_STATUS_COMPLETED, None)
 
 
 def execute_workflow_run(
@@ -731,13 +887,81 @@ def execute_workflow_run(
     workflow: Workflow,
     user_id: UUID,
     input_payload: dict | None = None,
+    *,
+    token_budget: int | None = None,
+    context_budget: int | None = None,
+    timeout_seconds: int | None = None,
+    retry_reason: str | None = None,
 ) -> WorkflowRun:
-    return _run_execution(
+    validate_workflow_for_execution(workflow)
+
+    run = _create_queued_run(
         db,
         workflow=workflow,
         user_id=user_id,
-        run_input=(input_payload or {}),
+        input_payload=_to_json(input_payload or {}),
+        token_budget=token_budget,
+        context_budget=context_budget,
+        timeout_seconds=timeout_seconds,
+        retry_reason=retry_reason,
     )
+
+    try:
+        run.celery_task_id = _enqueue_run_task(run)
+        db.commit()
+    except Exception as exc:
+        _mark_run_terminal(run, RUN_STATUS_FAILED, f"Failed to enqueue workflow run: {exc}")
+        db.commit()
+        raise ValueError("Failed to enqueue workflow run.") from exc
+
+    detailed_run = get_workflow_run_for_user(db, run.id, user_id, with_steps=True)
+    if detailed_run is None:
+        raise ValueError("Unable to load workflow run after enqueue.")
+    return detailed_run
+
+
+def retry_workflow_run(
+    db: Session,
+    source_run: WorkflowRun,
+    workflow: Workflow,
+    *,
+    user_id: UUID,
+    input_payload: dict[str, Any] | None = None,
+    token_budget: int | None = None,
+    context_budget: int | None = None,
+    timeout_seconds: int | None = None,
+    retry_reason: str | None = None,
+) -> WorkflowRun:
+    if source_run.status not in {RUN_STATUS_FAILED, RUN_STATUS_TIMED_OUT, RUN_STATUS_CANCELLED}:
+        raise ValueError("Run retry is only supported for failed, timed out, or cancelled runs.")
+
+    run_input = input_payload if input_payload is not None else _to_json(source_run.input_payload or {})
+    reason = retry_reason or f"Retry requested for run {source_run.id}"
+
+    run = _create_queued_run(
+        db,
+        workflow=workflow,
+        user_id=user_id,
+        input_payload=run_input,
+        retry_count=int(source_run.retry_count or 0) + 1,
+        retry_reason=reason,
+        token_budget=token_budget,
+        context_budget=context_budget,
+        timeout_seconds=timeout_seconds,
+    )
+
+    try:
+        run.celery_task_id = _enqueue_run_task(run)
+        db.commit()
+    except Exception as exc:
+        _mark_run_terminal(run, RUN_STATUS_FAILED, f"Failed to enqueue retry run: {exc}")
+        db.commit()
+        raise ValueError("Failed to enqueue retry run.") from exc
+
+    detailed_run = get_workflow_run_for_user(db, run.id, user_id, with_steps=True)
+    if detailed_run is None:
+        raise ValueError("Unable to load workflow run after enqueue.")
+    return detailed_run
 
 
 def retry_workflow_run_step(
@@ -748,31 +972,138 @@ def retry_workflow_run_step(
     *,
     user_id: UUID,
     input_payload: dict[str, Any] | None = None,
+    token_budget: int | None = None,
+    context_budget: int | None = None,
+    timeout_seconds: int | None = None,
+    retry_reason: str | None = None,
 ) -> WorkflowRun:
-    if retry_step.status != STEP_STATUS_FAILED:
-        raise ValueError("Only failed steps can be retried.")
-    if source_run.status != RUN_STATUS_FAILED:
-        raise ValueError("Step retry is only supported for failed runs.")
+    if retry_step.status not in {STEP_STATUS_FAILED, STEP_STATUS_TIMED_OUT}:
+        raise ValueError("Only failed or timed-out steps can be retried.")
+    if source_run.status not in {RUN_STATUS_FAILED, RUN_STATUS_TIMED_OUT}:
+        raise ValueError("Step retry is only supported for failed or timed-out runs.")
 
-    run_input = input_payload if input_payload is not None else _extract_run_input_from_steps(source_run.steps)
+    run_input = input_payload if input_payload is not None else _to_json(source_run.input_payload or {})
+    if not run_input:
+        run_input = _extract_run_input_from_steps(source_run.steps)
+
     previous_last_output, previous_step_outputs = _build_retry_state(source_run.steps, retry_step.step_index)
+    reason = retry_reason or f"Retry requested for step {retry_step.step_index} of run {source_run.id}"
 
-    retry_context = {
-        "source_run_id": str(source_run.id),
-        "source_step_id": str(retry_step.id),
-        "source_step_index": retry_step.step_index,
-    }
-
-    return _run_execution(
+    run = _create_queued_run(
         db,
         workflow=workflow,
         user_id=user_id,
-        run_input=run_input,
-        start_node_id=retry_step.node_id,
-        initial_last_output=previous_last_output,
-        initial_step_outputs=previous_step_outputs,
-        retry_context=retry_context,
+        input_payload=run_input,
+        execution_options={
+            "start_node_id": str(retry_step.node_id),
+            "initial_last_output": _to_json(previous_last_output),
+            "initial_step_outputs": _to_json(previous_step_outputs),
+            "retry_context": {
+                "source_run_id": str(source_run.id),
+                "source_step_id": str(retry_step.id),
+                "source_step_index": retry_step.step_index,
+            },
+        },
+        retry_count=int(source_run.retry_count or 0) + 1,
+        retry_reason=reason,
+        token_budget=token_budget,
+        context_budget=context_budget,
+        timeout_seconds=timeout_seconds,
     )
+
+    try:
+        run.celery_task_id = _enqueue_run_task(run)
+        db.commit()
+    except Exception as exc:
+        _mark_run_terminal(run, RUN_STATUS_FAILED, f"Failed to enqueue step retry run: {exc}")
+        db.commit()
+        raise ValueError("Failed to enqueue step retry run.") from exc
+
+    detailed_run = get_workflow_run_for_user(db, run.id, user_id, with_steps=True)
+    if detailed_run is None:
+        raise ValueError("Unable to load workflow run after enqueue.")
+    return detailed_run
+
+
+def cancel_workflow_run(db: Session, run: WorkflowRun, user_id: UUID) -> WorkflowRun:
+    if run.status in RUN_TERMINAL_STATUSES:
+        detailed_run = get_workflow_run_for_user(db, run.id, user_id, with_steps=True)
+        if detailed_run is None:
+            raise ValueError("Workflow run not found after cancellation request.")
+        return detailed_run
+
+    run.cancel_requested_at = _utcnow()
+    _mark_run_terminal(run, RUN_STATUS_CANCELLED, "Run was cancelled by user request.")
+
+    try:
+        if run.celery_task_id:
+            celery_app.control.revoke(run.celery_task_id, terminate=True, signal="SIGTERM")
+    except Exception:
+        pass
+
+    db.commit()
+    detailed_run = get_workflow_run_for_user(db, run.id, user_id, with_steps=True)
+    if detailed_run is None:
+        raise ValueError("Workflow run not found after cancellation request.")
+    return detailed_run
+
+
+def run_workflow_run_in_worker(
+    *,
+    run_id: str,
+    task_id: str | None = None,
+    worker_name: str | None = None,
+) -> None:
+    db = SessionLocal()
+    try:
+        run_uuid = UUID(run_id)
+    except ValueError:
+        db.close()
+        return
+
+    try:
+        run = db.scalar(
+            select(WorkflowRun)
+            .where(WorkflowRun.id == run_uuid)
+            .options(
+                selectinload(WorkflowRun.workflow).selectinload(Workflow.nodes),
+                selectinload(WorkflowRun.workflow).selectinload(Workflow.edges),
+            )
+        )
+        if run is None:
+            return
+        if run.status in RUN_TERMINAL_STATUSES:
+            return
+        if run.workflow is None:
+            _mark_run_terminal(run, RUN_STATUS_FAILED, "Workflow data is unavailable for this run.")
+            db.commit()
+            return
+
+        if task_id and not run.celery_task_id:
+            run.celery_task_id = task_id
+        if worker_name:
+            run.worker_name = worker_name
+        if run.status == RUN_STATUS_QUEUED:
+            run.status = RUN_STATUS_RUNNING
+        if run.started_at is None:
+            run.started_at = _utcnow()
+        db.commit()
+
+        try:
+            _execute_run(db, run=run, workflow=run.workflow)
+        except RunCancelledError as exc:
+            _mark_run_terminal(run, RUN_STATUS_CANCELLED, str(exc))
+        except (RunTimedOutError, SoftTimeLimitExceeded) as exc:
+            _mark_run_terminal(run, RUN_STATUS_TIMED_OUT, str(exc))
+        except Exception as exc:
+            _mark_run_terminal(run, RUN_STATUS_FAILED, str(exc))
+
+        if run.status in RUN_TERMINAL_STATUSES and run.completed_at is None:
+            run.completed_at = _utcnow()
+
+        db.commit()
+    finally:
+        db.close()
 
 
 def list_workflow_runs_for_user(db: Session, workflow_id: UUID, user_id: UUID) -> list[WorkflowRun]:

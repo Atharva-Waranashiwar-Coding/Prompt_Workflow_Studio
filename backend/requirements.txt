@@ -6,3 +6,4 @@ alembic==1.15.1
 pydantic==2.11.1
 pydantic-settings==2.8.1
 fastapi-mcp
+celery[redis]==5.4.0

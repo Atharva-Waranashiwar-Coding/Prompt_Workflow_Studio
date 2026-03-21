@@ -4,6 +4,7 @@ import {
   type WorkflowRecord,
   type WorkflowRunDetailRecord,
   type WorkflowRunRecord,
+  type WorkflowRunRetryPayload,
   type WorkflowRunStepRetryPayload,
   type WorkflowRunTriggerPayload,
   type WorkflowSavePayload,
@@ -94,6 +95,22 @@ export function retryWorkflowRunStep(
   payload: WorkflowRunStepRetryPayload = {},
 ): Promise<WorkflowRunDetailRecord> {
   return request<WorkflowRunDetailRecord>(`/workflow-runs/${runId}/steps/${stepId}/retry`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function cancelWorkflowRun(runId: string): Promise<WorkflowRunDetailRecord> {
+  return request<WorkflowRunDetailRecord>(`/workflow-runs/${runId}/cancel`, {
+    method: "POST",
+  });
+}
+
+export function retryWorkflowRun(
+  runId: string,
+  payload: WorkflowRunRetryPayload = {},
+): Promise<WorkflowRunDetailRecord> {
+  return request<WorkflowRunDetailRecord>(`/workflow-runs/${runId}/retry`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

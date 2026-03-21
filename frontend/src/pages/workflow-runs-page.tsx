@@ -15,6 +15,12 @@ function statusClass(status: string): string {
   if (status === "completed") {
     return "bg-emerald-100 text-emerald-700";
   }
+  if (status === "cancelled") {
+    return "bg-slate-200 text-slate-700";
+  }
+  if (status === "timed_out") {
+    return "bg-orange-100 text-orange-700";
+  }
   if (status === "failed") {
     return "bg-rose-100 text-rose-700";
   }

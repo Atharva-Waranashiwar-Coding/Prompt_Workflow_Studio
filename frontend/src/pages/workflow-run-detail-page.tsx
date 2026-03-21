@@ -2,7 +2,12 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useRetryWorkflowRunStepMutation, useWorkflowRunQuery } from "@/hooks/queries";
+import {
+  useCancelWorkflowRunMutation,
+  useRetryWorkflowRunMutation,
+  useRetryWorkflowRunStepMutation,
+  useWorkflowRunQuery,
+} from "@/hooks/queries";
 import { cn } from "@/lib/utils";
 
 function formatDate(value: string | null): string {
@@ -27,6 +32,12 @@ function statusClass(status: string): string {
   if (status === "completed") {
     return "bg-emerald-100 text-emerald-700";
   }
+  if (status === "cancelled") {
+    return "bg-slate-200 text-slate-700";
+  }
+  if (status === "timed_out") {
+    return "bg-orange-100 text-orange-700";
+  }
   if (status === "failed") {
     return "bg-rose-100 text-rose-700";
   }
@@ -39,6 +50,12 @@ function statusClass(status: string): string {
 function statusDotClass(status: string): string {
   if (status === "completed") {
     return "bg-emerald-500";
+  }
+  if (status === "cancelled") {
+    return "bg-slate-500";
+  }
+  if (status === "timed_out") {
+    return "bg-orange-500";
   }
   if (status === "failed") {
     return "bg-rose-500";
@@ -60,12 +77,21 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function formatBudget(used: number, budget: number | null): string {
+  if (budget === null) {
+    return `${used}`;
+  }
+  return `${used} / ${budget}`;
+}
+
 export function WorkflowRunDetailPage() {
   const navigate = useNavigate();
   const { projectId, workflowId, runId } = useParams<{ projectId: string; workflowId: string; runId: string }>();
 
   const runQuery = useWorkflowRunQuery(runId);
   const retryMutation = useRetryWorkflowRunStepMutation(runId, workflowId);
+  const cancelRunMutation = useCancelWorkflowRunMutation(runId, workflowId);
+  const retryRunMutation = useRetryWorkflowRunMutation(runId, workflowId);
 
   if (runQuery.isLoading) {
     return <p className="text-sm text-slate-500">Loading run details...</p>;
@@ -88,6 +114,25 @@ export function WorkflowRunDetailPage() {
     void navigate(`/projects/${projectId}/workflows/${workflowId}/runs/${retriedRun.id}`);
   };
 
+  const onCancelRun = async () => {
+    if (!runId) {
+      return;
+    }
+    await cancelRunMutation.mutateAsync();
+    await runQuery.refetch();
+  };
+
+  const onRetryRun = async () => {
+    if (!projectId || !workflowId) {
+      return;
+    }
+    const retriedRun = await retryRunMutation.mutateAsync({});
+    void navigate(`/projects/${projectId}/workflows/${workflowId}/runs/${retriedRun.id}`);
+  };
+
+  const canCancel = run.status === "queued" || run.status === "running";
+  const canRetryRun = run.status === "failed" || run.status === "timed_out" || run.status === "cancelled";
+
   return (
     <div className="space-y-4">
       <div className="space-y-1">
@@ -107,6 +152,16 @@ export function WorkflowRunDetailPage() {
           <span className={cn("rounded-full px-2 py-1 text-xs font-medium uppercase", statusClass(run.status))}>
             {run.status}
           </span>
+          {canCancel && (
+            <Button variant="secondary" size="sm" onClick={onCancelRun} disabled={cancelRunMutation.isPending}>
+              {cancelRunMutation.isPending ? "Cancelling..." : "Cancel Run"}
+            </Button>
+          )}
+          {canRetryRun && (
+            <Button variant="secondary" size="sm" onClick={onRetryRun} disabled={retryRunMutation.isPending}>
+              {retryRunMutation.isPending ? "Retrying..." : "Retry Run"}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -119,7 +174,20 @@ export function WorkflowRunDetailPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
+          {(cancelRunMutation.error || retryRunMutation.error) && (
+            <p className="rounded-md bg-rose-50 p-2 text-rose-700">
+              {((cancelRunMutation.error ?? retryRunMutation.error) as Error).message}
+            </p>
+          )}
           {run.error_message && <p className="rounded-md bg-rose-50 p-2 text-rose-700">{run.error_message}</p>}
+          <div className="grid gap-2 rounded-md bg-slate-50 p-3 text-xs text-slate-700 md:grid-cols-2">
+            <div>Queue: {run.queue_name ?? "-"}</div>
+            <div>Worker: {run.worker_name ?? "-"}</div>
+            <div>Retry Count: {run.retry_count}</div>
+            <div>Timeout: {run.timeout_seconds ? `${run.timeout_seconds}s` : "-"}</div>
+            <div>Token Budget: {formatBudget(run.token_used, run.token_budget)}</div>
+            <div>Context Budget: {formatBudget(run.context_used, run.context_budget)}</div>
+          </div>
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Final Result</p>
             <pre className="max-h-72 overflow-auto rounded-md bg-slate-900 p-3 text-xs text-slate-100">
@@ -135,14 +203,18 @@ export function WorkflowRunDetailPage() {
           <CardDescription>Step-level status, timing, inputs, outputs, memory, and validation traces.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {retryMutation.error && <p className="rounded-md bg-rose-50 p-2 text-sm text-rose-700">{(retryMutation.error as Error).message}</p>}
+          {retryMutation.error && (
+            <p className="rounded-md bg-rose-50 p-2 text-sm text-rose-700">{(retryMutation.error as Error).message}</p>
+          )}
           {run.steps.length === 0 && <p className="text-sm text-slate-500">No steps were executed for this run.</p>}
           {run.steps.map((step) => {
             const outputRecord = asRecord(step.output_payload);
             const validationRecord = asRecord(outputRecord?.validation);
             const isMemoryStep =
               outputRecord?.operation === "memory_read" || outputRecord?.operation === "memory_write";
-            const canRetryStep = run.status === "failed" && step.status === "failed";
+            const canRetryStep =
+              (run.status === "failed" || run.status === "timed_out") &&
+              (step.status === "failed" || step.status === "timed_out");
 
             return (
               <div key={step.id} className="rounded-lg border border-slate-200 bg-white">
@@ -155,7 +227,8 @@ export function WorkflowRunDetailPage() {
                       </p>
                       <p className="text-xs text-slate-500">
                         Node Type: {step.node_type} • {formatDate(step.started_at)} → {formatDate(step.completed_at)} •{" "}
-                        {formatDuration(step.started_at, step.completed_at)}
+                        {formatDuration(step.started_at, step.completed_at)} • Tokens: {step.token_used} • Context:{" "}
+                        {step.context_used}
                       </p>
                     </div>
                   </div>

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  cancelWorkflowRun,
   createProject,
   createWorkflow,
   executeWorkflow,
@@ -11,10 +12,13 @@ import {
   getWorkflowRun,
   getWorkflowRuns,
   getWorkflows,
+  retryWorkflowRun,
   retryWorkflowRunStep,
   saveWorkflow,
 } from "@/lib/api";
 import {
+  type WorkflowRunRecord,
+  type WorkflowRunRetryPayload,
   type WorkflowRunStepRetryPayload,
   type WorkflowRunTriggerPayload,
   type WorkflowSavePayload,
@@ -29,6 +33,15 @@ export const queryKeys = {
   workflowRun: (runId: string) => ["workflow-runs", runId] as const,
   tools: ["tools"] as const,
 };
+
+const ACTIVE_RUN_STATUSES = new Set(["queued", "running"]);
+
+function hasActiveRuns(runs: WorkflowRunRecord[] | undefined): boolean {
+  if (!runs || runs.length === 0) {
+    return false;
+  }
+  return runs.some((run) => ACTIVE_RUN_STATUSES.has(run.status));
+}
 
 export function useProjectsQuery() {
   return useQuery({
@@ -103,6 +116,10 @@ export function useWorkflowRunsQuery(workflowId: string | undefined) {
     queryKey: workflowId ? queryKeys.workflowRuns(workflowId) : ["workflow-runs", "missing"],
     queryFn: () => getWorkflowRuns(workflowId as string),
     enabled: Boolean(workflowId),
+    refetchInterval: (query) => {
+      const data = query.state.data as WorkflowRunRecord[] | undefined;
+      return hasActiveRuns(data) ? 2_000 : false;
+    },
   });
 }
 
@@ -111,6 +128,13 @@ export function useWorkflowRunQuery(runId: string | undefined) {
     queryKey: runId ? queryKeys.workflowRun(runId) : ["workflow-run", "missing"],
     queryFn: () => getWorkflowRun(runId as string),
     enabled: Boolean(runId),
+    refetchInterval: (query) => {
+      const data = query.state.data as WorkflowRunRecord | undefined;
+      if (!data) {
+        return false;
+      }
+      return ACTIVE_RUN_STATUSES.has(data.status) ? 2_000 : false;
+    },
   });
 }
 
@@ -133,6 +157,32 @@ export function useRetryWorkflowRunStepMutation(runId: string | undefined, workf
   return useMutation({
     mutationFn: (payload: { stepId: string; body?: WorkflowRunStepRetryPayload }) =>
       retryWorkflowRunStep(runId as string, payload.stepId, payload.body ?? {}),
+    onSuccess: (run) => {
+      void queryClient.setQueryData(queryKeys.workflowRun(run.id), run);
+      if (workflowId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workflowRuns(workflowId) });
+      }
+    },
+  });
+}
+
+export function useCancelWorkflowRunMutation(runId: string | undefined, workflowId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => cancelWorkflowRun(runId as string),
+    onSuccess: (run) => {
+      void queryClient.setQueryData(queryKeys.workflowRun(run.id), run);
+      if (workflowId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.workflowRuns(workflowId) });
+      }
+    },
+  });
+}
+
+export function useRetryWorkflowRunMutation(runId: string | undefined, workflowId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: WorkflowRunRetryPayload = {}) => retryWorkflowRun(runId as string, payload),
     onSuccess: (run) => {
       void queryClient.setQueryData(queryKeys.workflowRun(run.id), run);
       if (workflowId) {

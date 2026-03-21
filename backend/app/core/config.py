@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     default_user_name: str = "Dev User"
     enable_mcp_tools: bool = True
     mcp_mount_path: str = "/mcp"
+    redis_url: str = "redis://redis:6379/0"
+    celery_broker_url: str = "redis://redis:6379/0"
+    celery_result_backend: str = "redis://redis:6379/1"
+    celery_default_queue: str = "workflow_runs"
+    workflow_default_timeout_seconds: int = 300
+    workflow_default_token_budget: int = 8000
+    workflow_default_context_budget: int = 32000
 
     @field_validator("cors_origins", mode="before")
     @classmethod

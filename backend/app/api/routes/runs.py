@@ -8,14 +8,17 @@ from app.models.user import User
 from app.schemas.run import (
     WorkflowRunDetailRead,
     WorkflowRunRead,
+    WorkflowRunRetryRequest,
     WorkflowRunStepRetryRequest,
     WorkflowRunTriggerRequest,
 )
 from app.services.execution_service import (
+    cancel_workflow_run,
     execute_workflow_run,
     get_workflow_for_run_for_user,
     get_workflow_run_for_user,
     list_workflow_runs_for_user,
+    retry_workflow_run,
     retry_workflow_run_step,
 )
 from app.services.workflow_service import get_workflow_for_user
@@ -53,6 +56,10 @@ def post_workflow_run(
             workflow=workflow,
             user_id=current_user.id,
             input_payload=(payload.input_payload if payload else {}),
+            token_budget=(payload.token_budget if payload else None),
+            context_budget=(payload.context_budget if payload else None),
+            timeout_seconds=(payload.timeout_seconds if payload else None),
+            retry_reason=(payload.retry_reason if payload else None),
         )
         return run
     except ValueError as exc:
@@ -69,6 +76,54 @@ def get_workflow_run(
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow run not found")
     return run
+
+
+@router.post("/workflow-runs/{run_id}/cancel", response_model=WorkflowRunDetailRead)
+def post_cancel_workflow_run(
+    run_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> WorkflowRunDetailRead:
+    run = get_workflow_run_for_user(db, run_id=run_id, user_id=current_user.id, with_steps=True)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow run not found")
+
+    try:
+        return cancel_workflow_run(db, run=run, user_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/workflow-runs/{run_id}/retry", response_model=WorkflowRunDetailRead, status_code=status.HTTP_201_CREATED)
+def post_retry_workflow_run(
+    run_id: UUID,
+    payload: WorkflowRunRetryRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> WorkflowRunDetailRead:
+    run = get_workflow_run_for_user(db, run_id=run_id, user_id=current_user.id, with_steps=True)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow run not found")
+
+    workflow = get_workflow_for_run_for_user(db, workflow_id=run.workflow_id, user_id=current_user.id)
+    if workflow is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+
+    try:
+        retried_run = retry_workflow_run(
+            db,
+            source_run=run,
+            workflow=workflow,
+            user_id=current_user.id,
+            input_payload=(payload.input_payload if payload else None),
+            token_budget=(payload.token_budget if payload else None),
+            context_budget=(payload.context_budget if payload else None),
+            timeout_seconds=(payload.timeout_seconds if payload else None),
+            retry_reason=(payload.retry_reason if payload else None),
+        )
+        return retried_run
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/workflow-runs/{run_id}/steps/{step_id}/retry", response_model=WorkflowRunDetailRead, status_code=status.HTTP_201_CREATED)
@@ -99,6 +154,10 @@ def post_retry_workflow_run_step(
             workflow=workflow,
             user_id=current_user.id,
             input_payload=(payload.input_payload if payload else None),
+            token_budget=(payload.token_budget if payload else None),
+            context_budget=(payload.context_budget if payload else None),
+            timeout_seconds=(payload.timeout_seconds if payload else None),
+            retry_reason=(payload.retry_reason if payload else None),
         )
         return retried_run
     except ValueError as exc:

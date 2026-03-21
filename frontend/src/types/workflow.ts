@@ -105,8 +105,14 @@ export interface WorkflowReactNodeData {
   config: WorkflowNodeConfig;
 }
 
-export type WorkflowRunStatus = "queued" | "running" | "completed" | "failed";
-export type WorkflowRunStepStatus = "running" | "completed" | "failed";
+export type WorkflowRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "timed_out";
+export type WorkflowRunStepStatus = "running" | "completed" | "failed" | "cancelled" | "timed_out";
 
 export interface WorkflowRunStepRecord {
   id: string;
@@ -119,6 +125,10 @@ export interface WorkflowRunStepRecord {
   input_payload: unknown | null;
   output_payload: unknown | null;
   error_message: string | null;
+  retry_count: number;
+  retry_reason: string | null;
+  token_used: number;
+  context_used: number;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -130,6 +140,17 @@ export interface WorkflowRunRecord {
   triggered_by_user_id: string | null;
   status: WorkflowRunStatus;
   error_message: string | null;
+  celery_task_id: string | null;
+  queue_name: string | null;
+  worker_name: string | null;
+  timeout_seconds: number | null;
+  cancel_requested_at: string | null;
+  retry_count: number;
+  retry_reason: string | null;
+  token_budget: number | null;
+  token_used: number;
+  context_budget: number | null;
+  context_used: number;
   result_payload: unknown | null;
   started_at: string | null;
   completed_at: string | null;
@@ -142,10 +163,26 @@ export interface WorkflowRunDetailRecord extends WorkflowRunRecord {
 
 export interface WorkflowRunTriggerPayload {
   input_payload?: Record<string, unknown>;
+  token_budget?: number;
+  context_budget?: number;
+  timeout_seconds?: number;
+  retry_reason?: string;
 }
 
 export interface WorkflowRunStepRetryPayload {
   input_payload?: Record<string, unknown>;
+  token_budget?: number;
+  context_budget?: number;
+  timeout_seconds?: number;
+  retry_reason?: string;
+}
+
+export interface WorkflowRunRetryPayload {
+  input_payload?: Record<string, unknown>;
+  token_budget?: number;
+  context_budget?: number;
+  timeout_seconds?: number;
+  retry_reason?: string;
 }
 
 export interface ToolDefinitionRecord {
