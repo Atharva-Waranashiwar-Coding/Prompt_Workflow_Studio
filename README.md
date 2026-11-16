@@ -1,7 +1,29 @@
 # Prompt Workflow Studio
 
-Prompt Workflow Studio is a visual orchestration platform for prompt-first workflows.
-It lets users design graph-based flows using nodes (Prompt, Condition, Tool, Memory, Validator, Output), run them, inspect every step, and iterate safely with versions, audit history, and collaboration basics.
+Build, run, and debug prompt workflows on a visual graph canvas. Connect prompts, conditions, tools, memory, validators, and outputs, then inspect persisted results for every execution step.
+
+**Stack:** React, TypeScript, React Flow, FastAPI, PostgreSQL, SQLAlchemy, Celery, Redis, Docker Compose.
+
+## Local demo
+
+```bash
+docker compose up --build
+# In another terminal:
+docker compose exec backend python -m app.db.seed
+```
+
+Open [the builder](http://localhost:5173) and [API docs](http://localhost:8000/docs). Load **Seeded Tool + Memory + Validator**, run it, and open Run Details to inspect tool input, output, and validation results. Publish a version, edit the graph, and restore the snapshot to demonstrate versioning.
+
+No hosted demo is currently linked.
+
+## Architecture notes
+
+- FastAPI persists workflow graphs and run records in PostgreSQL; Celery workers execute queued runs through Redis.
+- Per-step logs, retries, cancellation, and timeouts make failures inspectable.
+- Authentication is a local scaffold. Tools are internal, and token/context budget accounting is simulated. External LLM provider integration is not implemented here.
+
+<details>
+<summary>Feature details, setup, and API reference</summary>
 
 ## Project Concept
 
@@ -280,3 +302,5 @@ Seed is idempotent and creates:
 - Auth is intentionally scaffold-level for now (header-based local user + default user fallback).
 - Execution is worker-backed via Celery and Redis.
 - Tools are internal/local in this stage (no external provider integration yet).
+
+</details>
